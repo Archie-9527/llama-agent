@@ -1,0 +1,121 @@
+# ============================================
+# llama-agent .gitignore
+# Merged from llama-cpp-python + langchain
+# ============================================
+
+# --- Environment & Dependencies ---
+.env
+.envrc
+.venv*
+venv*
+env/
+ENV/
+env.bak/
+llm-env/
+
+# --- Model files (large binaries) ---
+models/
+*.gguf
+*.bin
+*.ggml
+
+# --- macOS ---
+.DS_Store
+
+# --- IDE / Editor ---
+.vscode/
+.idea/
+*.swp
+*~
+
+# --- Byte-compiled / optimized / DLL files ---
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- C extensions ---
+*.so
+*.dylib
+*.dll
+*.lib
+*.metal
+
+# --- Build artifacts ---
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+_skbuild/
+
+# --- pip / installer logs ---
+pip-log.txt
+pip-delete-this-directory.txt
+
+# --- Unit test / coverage ---
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+.ruff_cache/
+.codspeed/
+
+# --- Translations ---
+*.mo
+*.pot
+
+# --- Jupyter ---
+.ipynb_checkpoints
+notebooks/
+
+# --- mypy ---
+.mypy_cache/
+.mypy_cache_test/
+.dmypy.json
+dmypy.json
+
+# --- pytype / Pyre ---
+.pyre/
+.pytype/
+
+# --- mkdocs ---
+/site
+
+# --- Docker ---
+docker/open_llama/*.bin
+
+# --- Misc ---
+*.log
+*.pkl
+.tool-versions
+.python-version
+.direnv
+.pdm.toml
+wandb/
+
+# --- LangChain specific ---
+.langgraph_api/
+prof/
+virtualenv/
+scratch/
+node_modules
+gha-creds-*.json
+llm-env/
