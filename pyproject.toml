@@ -1,0 +1,234 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# =============================================================================
+# llama-agent — Top-level Python project configuration
+# =============================================================================
+# Integrates three sub-projects:
+#   1. agent-wrapper/llama_agent    — LangChain + llama-cpp-python glue layer
+#   2. llama-cpp-python/llama_cpp   — ctypes bindings + vendored llama.cpp
+#   3. langchain/                   — langchain-core + langchain (editable)
+#
+# The native C/C++ libraries (llama.cpp) are built by CMakeLists.txt.
+# This pyproject.toml manages the Python side: dependencies, testing, linting,
+# and tool configuration that spans the entire workspace.
+# =============================================================================
+
+[project]
+name = "llama-agent"
+dynamic = ["version"]
+description = "Local LLM agent powered by llama-cpp-python and LangChain"
+license = { text = "MIT" }
+readme = "llama-agent-design-report.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "llama-agent contributors" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+# ---------------------------------------------------------------------------
+# Core dependencies
+# ---------------------------------------------------------------------------
+dependencies = [
+    # --- agent-wrapper direct deps ---
+    # (These are the packages that llama_agent/ modules import from)
+    "llama-cpp-python>=0.3.0",
+    "langchain>=1.0.0",
+    "langchain-core>=1.0.0",
+    "langgraph>=1.2.5",
+    "pydantic>=2.7.4,<3.0.0",
+]
+
+# ---------------------------------------------------------------------------
+# Optional dependency groups
+# ---------------------------------------------------------------------------
+
+[project.optional-dependencies]
+# OpenAI-compatible HTTP server (for llama_cpp.server)
+server = [
+    "uvicorn>=0.22.0",
+    "fastapi>=0.100.0",
+    "pydantic-settings>=2.0.1",
+    "sse-starlette>=1.6.1",
+    "starlette-context>=0.3.6,<0.4",
+    "PyYAML>=5.1",
+]
+
+# Test dependencies  (pytest + plugins)
+test = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.0.0,<8.0.0",
+    "pytest-xdist>=3.6.1,<4.0.0",
+    "pytest-asyncio>=0.21.0,<1.0.0",
+    "pytest-socket>=0.6.0,<1.0.0",
+    "httpx>=0.24.1",
+    "syrupy>=5.0.0,<6.0.0",
+]
+
+# Linting & formatting
+lint = [
+    "ruff>=0.15.0,<0.16.0",
+]
+
+# Type checking
+typing = [
+    "mypy>=1.8.0,<2.0.0",
+]
+
+# Development convenience (lint + typing + test)
+dev = [
+    "llama-agent[lint,typing,test]",
+]
+
+# Everything
+all = [
+    "llama-agent[server,dev]",
+]
+
+# ---------------------------------------------------------------------------
+# Editable-install sources (local sub-projects)
+# ---------------------------------------------------------------------------
+# When you run `pip install -e .`, these [tool.uv.sources] entries resolve the
+# langchain / llama-cpp-python dependencies to the in-tree copies rather than
+# pulling them from PyPI.  Works with both pip and uv.
+# ---------------------------------------------------------------------------
+
+[tool.uv.sources]
+llama-cpp-python = { path = "llama-cpp-python", editable = true }
+langchain = { path = "langchain/libs/langchain_v1", editable = true }
+langchain-core = { path = "langchain/libs/core", editable = true }
+
+# Partner packages (optional: install individual partner extras to get these)
+langchain-openai = { path = "langchain/libs/partners/openai", editable = true }
+langchain-anthropic = { path = "langchain/libs/partners/anthropic", editable = true }
+langchain-ollama = { path = "langchain/libs/partners/ollama", editable = true }
+langchain-huggingface = { path = "langchain/libs/partners/huggingface", editable = true }
+langchain-mistralai = { path = "langchain/libs/partners/mistralai", editable = true }
+langchain-groq = { path = "langchain/libs/partners/groq", editable = true }
+langchain-deepseek = { path = "langchain/libs/partners/deepseek", editable = true }
+langchain-fireworks = { path = "langchain/libs/partners/fireworks", editable = true }
+langchain-chroma = { path = "langchain/libs/partners/chroma", editable = true }
+langchain-qdrant = { path = "langchain/libs/partners/qdrant", editable = true }
+langchain-nomic = { path = "langchain/libs/partners/nomic", editable = true }
+langchain-xai = { path = "langchain/libs/partners/xai", editable = true }
+langchain-exa = { path = "langchain/libs/partners/exa", editable = true }
+langchain-perplexity = { path = "langchain/libs/partners/perplexity", editable = true }
+langchain-openrouter = { path = "langchain/libs/partners/openrouter", editable = true }
+
+# ---------------------------------------------------------------------------
+# Version provider
+# ---------------------------------------------------------------------------
+[tool.hatch.version]
+path = "agent-wrapper/llama_agent/__init__.py"
+pattern = '''__version__\s*=\s*["'](?P<version>[^"']+)["']'''
+
+# ---------------------------------------------------------------------------
+# Ruff — linting & formatting across all Python sources
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+src = [
+    "agent-wrapper/llama_agent",
+    "llama-cpp-python/llama_cpp",
+    "langchain/libs/core/langchain_core",
+    "langchain/libs/langchain_v1/langchain",
+]
+extend-exclude = [
+    "vendor",
+    "llama-cpp-python/vendor",
+    "langchain/libs/partners/*",
+]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ruff.lint]
+select = [
+    "E4", "E7", "E9",   # pycodestyle errors
+    "F",                 # pyflakes
+    "I",                 # isort
+    "UP",                # pyupgrade
+    "B",                 # flake8-bugbear
+]
+ignore = [
+    "B008",   # do not perform function calls in argument defaults (pydantic Fields)
+    "B028",   # intentionally tune stacklevel
+]
+unfixable = ["B028"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["llama_agent", "llama_cpp"]
+force-sort-within-sections = true
+
+[tool.ruff.lint.extend-per-file-ignores]
+"tests/*" = [
+    "S101",    # assert is fine in tests
+    "SLF001",  # private member access is fine in tests
+]
+
+# ---------------------------------------------------------------------------
+# Mypy — type checking
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+warn_return_any = true
+warn_unused_configs = true
+exclude = [
+    "vendor/",
+    "llama-cpp-python/vendor/",
+    "langchain/libs/partners/",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "llama_cpp.*",
+    "langchain_core.*",
+    "langchain.*",
+    "langgraph.*",
+]
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------------------
+# Pytest — test configuration
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = [
+    "agent-wrapper/tests",
+]
+addopts = "--strict-markers --strict-config --durations=5 -v"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests (require a model file)",
+]
+asyncio_mode = "auto"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["agent-wrapper/llama_agent"]
+omit = ["tests/*"]
+
+# ---------------------------------------------------------------------------
+# Project URLs
+# ---------------------------------------------------------------------------
+[project.urls]
+Homepage = "https://github.com/llama-agent/llama-agent"
+Repository = "https://github.com/llama-agent/llama-agent"
+Issues = "https://github.com/llama-agent/llama-agent/issues"
