@@ -1,0 +1,47 @@
+# .github/workflows/build-wheelhouse.yml
+name: 生成离线部署包
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build-wheelhouse:
+    strategy:
+      matrix:
+        container:
+          - quay.io/pypa/manylinux2014_x86_64
+          - quay.io/pypa/manylinux_2_28_x86_64
+    runs-on: ubuntu-latest
+    container: ${{ matrix.container }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 下载并编译全部依赖为本地wheel
+        run: |
+          mkdir -p wheelhouse
+          /opt/python/cp311-cp311/bin/pip download \
+            -r requirements.lock \
+            --no-binary llama-cpp-python \
+            --dest wheelhouse/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheelhouse-${{ matrix.container }}
+          path: wheelhouse/
+
+  build-wheelhouse-os:
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip download -r requirements.lock --dest wheelhouse/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheelhouse-${{ matrix.os }}
+          path: wheelhouse/
