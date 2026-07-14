@@ -53,7 +53,6 @@ def _install_llama_cpp_mock():
         def __init__(self, *, model_path: str, **kwargs):
             if not model_path or not _is_existing_path(model_path):
                 raise ValueError(f"File not found: {model_path}")
-            # Store for later inspection by tests
             self.model_path = model_path
             self.n_ctx = kwargs.get("n_ctx")
             for k, v in kwargs.items():
@@ -64,6 +63,19 @@ def _install_llama_cpp_mock():
             return list(range(len(data)))
 
     mock_llama_cpp.Llama = _MockLlama
+
+    # llama_cpp.LlamaGrammar — used by grammar_builder.py which wraps
+    # GBNF strings in LlamaGrammar objects before returning them.
+    class _MockLlamaGrammar:
+        """Minimal LlamaGrammar stand-in with a ``_grammar`` string attr."""
+
+        def __init__(self, _grammar: str):
+            self._grammar = _grammar
+
+        def __str__(self) -> str:
+            return self._grammar
+
+    mock_llama_cpp.LlamaGrammar = _MockLlamaGrammar
 
     # llama_cpp.llama_types — used by type annotations in llm_engine.py
     mock_llama_cpp.llama_types = MagicMock()
