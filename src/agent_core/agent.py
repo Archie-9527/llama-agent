@@ -10,7 +10,8 @@ from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 from langchain.agents import create_agent  # type: ignore[import-untyped]
 
-from .chat_model import LlamaCppChatModel
+from agent_core.llm_engine import ChatLlamaCpp
+
 
 def create_llama_agent(
     model: Optional[BaseChatModel] = None,
@@ -19,7 +20,7 @@ def create_llama_agent(
     tools: Sequence[BaseTool | Callable[..., Any] | dict[str, Any]] | None = None,
     system_prompt: Optional[str] = None,
     n_ctx: int = 4096,
-    n_gpu_layers: int = -1,
+    n_gpu_layers: int = 0,
     temperature: float = 0.7,
     chat_format: str = "chatml",
     verbose: bool = False,
@@ -28,16 +29,16 @@ def create_llama_agent(
 
     This is a thin wrapper around langchain.agents.create_agent() that handles
     model setup automatically. All arguments after ``model`` are forwarded to
-    LlamaCppChatModel when ``model`` is not provided directly.
+    ChatLlamaCpp when ``model`` is not provided directly.
 
     Args:
-        model: An existing BaseChatModel instance. If None, a LlamaCppChatModel
+        model: An existing BaseChatModel instance. If None, a ChatLlamaCpp
             is created from the other parameters.
         model_path: Path to the GGUF model file (required if model is None).
         tools: Tools available to the agent.
         system_prompt: Optional system prompt for the agent.
         n_ctx: Context window size (default 4096).
-        n_gpu_layers: GPU layers, -1 means all (default).
+        n_gpu_layers: GPU layers, 0 means CPU-only (default).
         temperature: Sampling temperature (default 0.7).
         chat_format: Chat template format (default 'chatml').
         verbose: Enable verbose logging.
@@ -48,7 +49,7 @@ def create_llama_agent(
     if model is None:
         if model_path is None:
             raise ValueError("model_path is required when model is not provided")
-        model = LlamaCppChatModel(
+        model = ChatLlamaCpp(
             model_path=model_path,
             n_ctx=n_ctx,
             n_gpu_layers=n_gpu_layers,
