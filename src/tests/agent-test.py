@@ -1,13 +1,16 @@
 # llama-agent integration test — agent with tool calling
 # python agent-wrapper/tests/test_agent.py
 
+import os
 import sys
 sys.path.insert(0, "agent-wrapper")
 
 from langchain_core.tools import tool
 from agent_core.agent import create_llama_agent
 
-MODEL_PATH = "/Users/heart/Code/Py-Project/llama-agent/src/tests/models/Qwen3.5-4B-UD-Q8_K_XL.gguf"
+current_dir = os.path.dirname(os.path.abspath(__file__))
+model_filename = "Qwen3.5-4B-UD-Q8_K_XL.gguf"
+model_path = os.path.join(current_dir, "models", model_filename)
 
 
 @tool
@@ -24,7 +27,7 @@ def word_count(text: str) -> int:
 
 
 agent = create_llama_agent(
-    model_path=MODEL_PATH,
+    model_path=model_path,
     tools=[word_count],
     system_prompt="You are a helpful assistant. Use tools when appropriate, reply concisely in English.",
     n_ctx=2048,

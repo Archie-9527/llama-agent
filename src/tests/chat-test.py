@@ -1,7 +1,10 @@
 from llama_cpp import Llama
+import os
 
 def main():
-    model_path = "/Users/heart/Code/Py-Project/llama-agent/src/tests/models/Qwen3.5-4B-UD-Q8_K_XL.gguf" 
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    model_filename = "Qwen3.5-4B-UD-Q8_K_XL.gguf"
+    model_path = os.path.join(current_dir, "models", model_filename)
 
     # 初始化模型
     llm = Llama(
