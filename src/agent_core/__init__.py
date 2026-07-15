@@ -5,10 +5,14 @@ from agent_core.exceptions import (
     AgentCoreError,
     AgentEngineError,
     ContextBudgetExceededError,
+    ExecutionError,
     GrammarCompileError,
+    GraphOrchestrationError,
     InferenceTimeoutError,
     ModelLoadError,
+    PlanningError,
     PromptAssemblyError,
+    ReflectionError,
     ToolConsistencyError,
 )
 
@@ -19,9 +23,13 @@ __all__ = [
     "AgentCoreError",
     "AgentEngineError",
     "ContextBudgetExceededError",
+    "ExecutionError",
     "GrammarCompileError",
+    "GraphOrchestrationError",
     "InferenceTimeoutError",
     "ModelLoadError",
+    "PlanningError",
     "PromptAssemblyError",
+    "ReflectionError",
     "ToolConsistencyError",
 ]

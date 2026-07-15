@@ -56,3 +56,25 @@ class ToolConsistencyError(PromptAssemblyError):
     """The human-readable tool descriptions embedded in the system prompt do
     not match the tool set used for grammar constraint — the model sees a
     different tool list than what the grammar actually permits."""
+
+
+# ── Graph orchestration layer ────────────────────────────────────────────────
+
+
+class GraphOrchestrationError(AgentCoreError):
+    """Base exception for graph orchestration (Planner / Executor / Reflector)."""
+
+
+class PlanningError(GraphOrchestrationError):
+    """Planner output could not be parsed into a valid plan — malformed JSON,
+    missing ``steps`` key, or empty step list."""
+
+
+class ExecutionError(GraphOrchestrationError):
+    """Executor inner subgraph failed — recursion limit exceeded, tool-call
+    pair mismatch, or unhandled runtime error during step execution."""
+
+
+class ReflectionError(GraphOrchestrationError):
+    """Reflector produced a decision outside the valid enum set
+    (``done`` / ``continue`` / ``failed``)."""
