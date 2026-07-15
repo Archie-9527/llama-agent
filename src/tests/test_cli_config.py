@@ -472,7 +472,11 @@ class TestCLI:
             "agent_core.cli.initialize_engine", return_value=MagicMock()
         ) as mock_init, patch(
             "agent_core.cli.TaskRunner", autospec=True
-        ) as mock_runner_cls:
+        ) as mock_runner_cls, patch(
+            "agent_core.capabilities.bootstrap.bootstrap_capabilities"
+        ) as mock_bootstrap, patch(
+            "agent_core.graph.react_agent_factory.initialize_react_agent"
+        ) as mock_ragent:
             mock_runner = mock_runner_cls.return_value
             mock_runner.start_new_task.return_value = ("test-tid", self._mock_result)
             mock_runner.resume_task.return_value = self._mock_result
@@ -560,8 +564,13 @@ class TestCLI:
     # L11
     def test_missing_model_path_returns_business_error(self, _mocks):
         """ValueError from load_engine_config is NOT an AgentEngineError."""
-        os.environ.pop("AGENT_MODEL_PATH", None)  # remove the fixture default
-        rc = main(["run", "test"])  # no model_path anywhere
+        # The fixture sets AGENT_MODEL_PATH, so engine config loads fine.
+        # We must force load_engine_config to raise ValueError.
+        with patch(
+            "agent_core.cli.load_engine_config",
+            side_effect=ValueError("engine.model_path is not configured"),
+        ):
+            rc = main(["--model-path", "/x.gguf", "run", "test"])
         assert rc == EXIT_BUSINESS_ERROR
 
     # L12

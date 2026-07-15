@@ -259,3 +259,19 @@ def engine_config_field_names() -> set[str]:
 
 # Backward-compat alias
 load_config = load_app_config
+
+
+def load_tools_config(config_file: Optional[Path] = None) -> "ToolsConfig":
+    """Load tool configuration from the ``[tools]`` TOML section.
+
+    The ``providers`` sub-dict is passed through as-is — each
+    provider owns its own parsing and validation.
+    """
+    from agent_core.capabilities.bootstrap import ToolsConfig
+
+    file_data = _resolve_config_file(config_file)
+    tools_data: dict = file_data.get("tools", {})
+    return ToolsConfig(
+        enabled_tools=tools_data.get("enabled_tools", []),
+        providers=tools_data.get("providers", {}),
+    )

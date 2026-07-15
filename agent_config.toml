@@ -23,10 +23,10 @@ log_level = "INFO"
 # ---------------------------------------------------------------------------
 [engine]
 # [必填] GGUF 模型文件路径
-model_path = "./models/Qwen3.5-4B-UD-Q8_K_XL.gguf"
+model_path = "/Users/heart/Code/py-project/llama-agent/src/tests/models/Qwen3.5-4B-UD-Q8_K_XL.gguf"
 
 # 上下文窗口大小（token 数）
-n_ctx = 10000
+n_ctx = 20000
 
 # GPU 层数（0 = 纯CPU；-1 = 全部offload到GPU）
 n_gpu_layers = 0
@@ -60,3 +60,10 @@ verbose = false
 
 # 单次推理超时时间（秒）
 request_timeout = 60.0
+
+[tools]
+enabled_tools = ["execute_shell_command", "fetch_url", "web_search", "count_lines"]
+
+[tools.providers.shell]
+
+[tools.providers.web]

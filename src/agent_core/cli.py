@@ -207,10 +207,32 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Model load failed: {exc}", file=sys.stderr)
         return EXIT_ENGINE_INIT_ERROR
 
-    # Step 6 — TaskRunner
+    # Step 6 — tool bootstrap (must happen BEFORE ReAct subgraph construction)
+    try:
+        from agent_core.config import load_tools_config
+        from agent_core.capabilities.bootstrap import bootstrap_capabilities
+
+        tools_config = load_tools_config(config_file=args.config)
+        bootstrap_capabilities(tools_config)
+    except Exception as exc:
+        logger.error("Tool bootstrap failed: %s", exc)
+        print(f"Tool bootstrap failed: {exc}", file=sys.stderr)
+        return EXIT_BUSINESS_ERROR
+
+    # Step 7 — ReAct inner subgraph construction (reads from capability_registry)
+    try:
+        from agent_core.graph.react_agent_factory import initialize_react_agent
+
+        initialize_react_agent()
+    except Exception as exc:
+        logger.error("ReAct agent init failed: %s", exc)
+        print(f"ReAct agent init failed: {exc}", file=sys.stderr)
+        return EXIT_BUSINESS_ERROR
+
+    # Step 8 — TaskRunner
     runner = TaskRunner(app_config.to_run_config())
     try:
-        # Step 7 — dispatch
+        # Step 9 — dispatch
         if args.command == "run":
             thread_id, result = runner.start_new_task(args.goal)
             print(f"Task ID: {thread_id}")
@@ -230,7 +252,7 @@ def main(argv: list[str] | None = None) -> int:
             _print_result(result)
             return EXIT_OK
 
-    # Step 8 — exception normalisation
+    # Step 10 — exception normalisation
     except ValueError as exc:
         print(f"Argument error: {exc}", file=sys.stderr)
         return EXIT_BUSINESS_ERROR

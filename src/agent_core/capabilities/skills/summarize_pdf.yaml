@@ -1,0 +1,9 @@
+name: summarize_pdf
+description: "Extract the raw text content of a PDF file for subsequent summarisation.  Parameter 'file_path' is the absolute path to the PDF file on disk."
+kind: shell_template
+command_template: "pdftotext {file_path} -"
+args:
+  file_path:
+    type: string
+    description: "Absolute path to the PDF file"
+    required: true

@@ -15,6 +15,13 @@ dev = ["pytest", "ruff", "matplotlib"]
 [tool.setuptools]
 package-dir = {"" = "src"}
 
+[project.scripts]
+llama-agent = "agent_core.cli:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["agent_core*"]

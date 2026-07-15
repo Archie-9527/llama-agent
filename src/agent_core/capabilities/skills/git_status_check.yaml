@@ -1,0 +1,9 @@
+name: git_status_check
+description: "Show the current status of a git repository (unstaged / staged changes, untracked files).  Parameter 'repo_path' is the absolute path to the git repository directory."
+kind: shell_template
+command_template: "git -C {repo_path} status --short"
+args:
+  repo_path:
+    type: string
+    description: "Absolute path to the git repository"
+    required: true

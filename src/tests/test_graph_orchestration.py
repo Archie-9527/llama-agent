@@ -328,7 +328,7 @@ class TestExecutorNode:
         mock_config = {"configurable": {"thread_id": "test-thread"}}
 
         with patch("agent_core.graph.executor._build_react_input", return_value={"messages": []}), \
-             patch("agent_core.graph.react_agent_factory.get_react_agent", return_value=mock_agent):
+             patch("agent_core.graph.react_agent_factory.initialize_react_agent", return_value=mock_agent):
             result = executor_node(base_state, config=mock_config)  # type: ignore[call-arg]
 
         assert len(result["execution_log"]) == 1
@@ -352,7 +352,7 @@ class TestExecutorNode:
         mock_config = {"configurable": {"thread_id": "test-thread"}}
 
         with patch("agent_core.graph.executor._build_react_input", return_value={"messages": [SystemMessage(content="test")]}), \
-             patch("agent_core.graph.react_agent_factory.get_react_agent", return_value=mock_agent):
+             patch("agent_core.graph.react_agent_factory.initialize_react_agent", return_value=mock_agent):
             # Step 1
             result = executor_node(base_state, config=mock_config)  # type: ignore[call-arg]
             assert result["current_step_index"] == 1
@@ -380,7 +380,7 @@ class TestExecutorNode:
         mock_config = {"configurable": {"thread_id": "test-thread"}}
 
         with patch("agent_core.graph.executor._build_react_input", return_value={"messages": [SystemMessage(content="test")]}), \
-             patch("agent_core.graph.react_agent_factory.get_react_agent", return_value=mock_agent):
+             patch("agent_core.graph.react_agent_factory.initialize_react_agent", return_value=mock_agent):
             with pytest.raises(ExecutionError) as exc_info:
                 executor_node(base_state, config=mock_config)  # type: ignore[call-arg]
             assert "recursion" in str(exc_info.value).lower()
@@ -672,13 +672,13 @@ class TestInnerSubgraphNoCheckpointer:
 
 
 class TestLruCache:
-    """A16: get_react_agent() returns same object on repeated calls."""
+    """A16: initialize_react_agent() returns same object on repeated calls."""
 
     def test_lru_cache_returns_same_object(self):
-        """get_react_agent must have @lru_cache and return same instance."""
-        from agent_core.graph.react_agent_factory import get_react_agent
-        assert hasattr(get_react_agent, "cache_info"), (
-            "get_react_agent must be decorated with @lru_cache"
+        """initialize_react_agent must have @lru_cache and return same instance."""
+        from agent_core.graph.react_agent_factory import initialize_react_agent
+        assert hasattr(initialize_react_agent, "cache_info"), (
+            "initialize_react_agent must be decorated with @lru_cache"
         )
 
 
@@ -702,7 +702,7 @@ class TestPlanBSwitchability:
 
 
 class TestSingleSourceOfTruth:
-    """A19: get_react_agent tools come from list_capabilities()."""
+    """A19: initialize_react_agent tools come from list_capabilities()."""
 
     def test_tools_from_capability_registry(self):
         """Registered capabilities must appear in the inner agent's tool list."""

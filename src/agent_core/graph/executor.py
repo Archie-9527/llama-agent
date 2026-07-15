@@ -187,9 +187,9 @@ def executor_node(state: "AgentState", config: RunnableConfig) -> "AgentState":
     input_message_count = len(react_input["messages"])
 
     # Get the cached inner agent
-    from agent_core.graph.react_agent_factory import get_react_agent
+    from agent_core.graph.react_agent_factory import initialize_react_agent
 
-    agent = get_react_agent()
+    agent = initialize_react_agent()
 
     # Run the inner loop with a recursion-limit safety cap
     try:

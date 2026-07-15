@@ -217,18 +217,19 @@ def _build_via_self_made_stategraph():
 
 
 # ---------------------------------------------------------------------------
-# [STABLE] Public entry-point
+# [STABLE] Public entry-points
 # ---------------------------------------------------------------------------
 
 
 @lru_cache(maxsize=1)
-def get_react_agent():
-    """Return the (cached) compiled ReAct inner subgraph.
+def initialize_react_agent():
+    """Build and cache the compiled ReAct inner subgraph.
+
+    Must be called **after** ``bootstrap_capabilities()`` so that
+    ``list_capabilities()`` returns a non-empty list.
 
     The subgraph is built once and reused across every executor_node
-    invocation.  Tools are snapshotted at build time — if you register
-    new capabilities after the first call you must clear the LRU cache
-    (``get_react_agent.cache_clear()``) or restart the process.
+    invocation.  Tools are snapshotted at build time.
 
     Route selection:
         * ``USE_OFFICIAL_CREATE_AGENT=true`` (default) → ``create_agent``.
@@ -237,3 +238,13 @@ def get_react_agent():
     if USE_OFFICIAL_CREATE_AGENT:
         return _build_via_create_agent()
     return _build_via_self_made_stategraph()
+
+
+# Backward-compat alias — the V2/V3 naming transition.
+get_react_agent = initialize_react_agent
+
+
+def _reset_react_agent_for_testing() -> None:
+    """[TEST-ONLY] Clear the cached ReAct subgraph so a fresh one can be
+    built (e.g. after registering new capabilities in a test)."""
+    initialize_react_agent.cache_clear()

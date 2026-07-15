@@ -1,0 +1,13 @@
+name: count_lines
+description: "统计指定目录下某类文件的总行数。适用于快速了解代码规模。"
+kind: shell_template
+command_template: "find {dir_path} -name '{pattern}' -exec wc -l {{}} +"
+args:
+  dir_path:
+    type: string
+    description: "要统计的目录路径"
+    required: true
+  pattern:
+    type: string
+    description: "文件名匹配模式，如 '*.py'"
+    required: true
