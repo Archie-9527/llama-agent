@@ -137,33 +137,26 @@ def _build_history_messages(execution_log: list[dict]) -> list[BaseMessage]:
     +------------------------------+--------------------------------------------------+
     """
     messages: list[BaseMessage] = []
-    for entry in execution_log:
-        step_text = entry.get("step", "")
-        result_text = entry.get("result", "")
-        tool_used: Optional[str] = entry.get("tool_used")
-
-        if step_text:
-            messages.append(HumanMessage(content=step_text))
-
-        if tool_used:
-            call_id = f"call_{uuid.uuid4().hex[:8]}"
+    previous_step: str | None = None
+    for i, entry in enumerate(execution_log): 
+        
+        current_step = entry["step"]
+        if current_step != previous_step:
+            messages.append(HumanMessage(content=current_step))
+            previous_step = current_step
+        
+        if entry["tool_used"] is not None:
+            call_id = f"hist_call_{i}"
             messages.append(
                 AIMessage(
                     content="",
-                    tool_calls=[
-                        ToolCall(
-                            name=tool_used,
-                            args={},  # simplified — at assembly time we don't know args
-                            id=call_id,
-                        )
-                    ],
+                    tool_calls=[{"name": entry["tool_used"], "args": {}, "id": call_id}],
                 )
             )
-            messages.append(
-                ToolMessage(content=result_text, tool_call_id=call_id)
-            )
+            messages.append(ToolMessage(content=entry["result"], tool_call_id=call_id))
         else:
-            messages.append(AIMessage(content=result_text))
+            messages.append(AIMessage(content=entry["result"]))
+
     return messages
 
 

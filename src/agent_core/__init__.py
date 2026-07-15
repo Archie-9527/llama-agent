@@ -16,6 +16,8 @@ from agent_core.exceptions import (
     ToolConsistencyError,
 )
 
+from agent_core.session import RunConfig, TaskRunner
+
 __all__ = [
     "ChatLlamaCpp",
     "get_engine",
@@ -31,5 +33,7 @@ __all__ = [
     "PlanningError",
     "PromptAssemblyError",
     "ReflectionError",
+    "RunConfig",
+    "TaskRunner",
     "ToolConsistencyError",
 ]

@@ -324,9 +324,12 @@ class TestExecutorNode:
             "messages": [AIMessage(content="Hello!")]
         }
 
-        with patch("agent_core.graph.executor._build_react_input", return_value={"messages": [SystemMessage(content="test")]}), \
+        # Build a mock config with the thread_id that executor_node expects
+        mock_config = {"configurable": {"thread_id": "test-thread"}}
+
+        with patch("agent_core.graph.executor._build_react_input", return_value={"messages": []}), \
              patch("agent_core.graph.react_agent_factory.get_react_agent", return_value=mock_agent):
-            result = executor_node(base_state)
+            result = executor_node(base_state, config=mock_config)  # type: ignore[call-arg]
 
         assert len(result["execution_log"]) == 1
         assert result["execution_log"][0]["tool_used"] is None
@@ -346,20 +349,22 @@ class TestExecutorNode:
             "messages": [AIMessage(content="Done.")]
         }
 
+        mock_config = {"configurable": {"thread_id": "test-thread"}}
+
         with patch("agent_core.graph.executor._build_react_input", return_value={"messages": [SystemMessage(content="test")]}), \
              patch("agent_core.graph.react_agent_factory.get_react_agent", return_value=mock_agent):
             # Step 1
-            result = executor_node(base_state)
+            result = executor_node(base_state, config=mock_config)  # type: ignore[call-arg]
             assert result["current_step_index"] == 1
             assert result["status"] != "reflecting"  # more steps remain
 
             # Step 2
-            result = executor_node(result)
+            result = executor_node(result, config=mock_config)  # type: ignore[call-arg]
             assert result["current_step_index"] == 2
             assert result["status"] != "reflecting"
 
             # Step 3 — last step
-            result = executor_node(result)
+            result = executor_node(result, config=mock_config)  # type: ignore[call-arg]
             assert result["current_step_index"] == 3
             assert result["status"] == "reflecting"
 
@@ -372,18 +377,21 @@ class TestExecutorNode:
         mock_agent = MagicMock()
         mock_agent.invoke.side_effect = Exception("GraphRecursionError: recursion limit")
 
+        mock_config = {"configurable": {"thread_id": "test-thread"}}
+
         with patch("agent_core.graph.executor._build_react_input", return_value={"messages": [SystemMessage(content="test")]}), \
              patch("agent_core.graph.react_agent_factory.get_react_agent", return_value=mock_agent):
             with pytest.raises(ExecutionError) as exc_info:
-                executor_node(base_state)
+                executor_node(base_state, config=mock_config)  # type: ignore[call-arg]
             assert "recursion" in str(exc_info.value).lower()
 
     def test_executor_out_of_range_step_raises(self, base_state):
         """Calling executor with current_step_index beyond plan_steps → ExecutionError."""
         base_state["plan_steps"] = []
         base_state["current_step_index"] = 0
+        mock_config = {"configurable": {"thread_id": "test-thread"}}
         with pytest.raises(ExecutionError):
-            executor_node(base_state)
+            executor_node(base_state, config=mock_config)  # type: ignore[call-arg]
 
 
 # ── Acceptance A9: Reflector enum strictness ─────────────────────────────────

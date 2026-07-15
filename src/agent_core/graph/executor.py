@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.messages.utils import convert_to_messages
+from langchain_core.runnables import RunnableConfig
 
 from agent_core.exceptions import ExecutionError
 from agent_core.llm_engine import get_engine
@@ -86,6 +87,7 @@ def _extract_execution_result(
             ``tool_call_id`` that has no matching ``ToolMessage`` in the
             remaining messages.
     """
+
     records: list[dict] = []
     i = 0
     while i < len(messages):
@@ -139,7 +141,7 @@ def _extract_execution_result(
 # ---------------------------------------------------------------------------
 
 
-def executor_node(state: "AgentState") -> "AgentState":
+def executor_node(state: "AgentState", config: RunnableConfig) -> "AgentState":
     """Execute the current plan step via the ReAct inner subgraph.
 
     1. Look up the current step from ``plan_steps[current_step_index]``.
@@ -167,9 +169,22 @@ def executor_node(state: "AgentState") -> "AgentState":
         )
 
     current_step = plan_steps[current_step_index]
+    outer_thread_id = config["configurable"]["thread_id"]
+
+    sub_config = {
+        "configurable": {
+            "thread_id": f"{outer_thread_id}::step-{current_step_index}"
+        },
+        "recursion_limit": 8
+    }
 
     # Build input for the inner subgraph
     react_input = _build_react_input(state)
+
+    # 记录输入消息的数量，以便我们稍后可以仅隔离由内部代理新生成的消息。
+    # 内部子图可能会返回完整的对话历史记录（例如，当FakeReactAgent连接输入和输出时），
+    # 我们不能重新从已经在先前步骤中记录的历史消息中提取记录。
+    input_message_count = len(react_input["messages"])
 
     # Get the cached inner agent
     from agent_core.graph.react_agent_factory import get_react_agent
@@ -178,7 +193,7 @@ def executor_node(state: "AgentState") -> "AgentState":
 
     # Run the inner loop with a recursion-limit safety cap
     try:
-        react_output = agent.invoke(react_input, config={"recursion_limit": 8})
+        react_output = agent.invoke(react_input, config=sub_config)
     except Exception as exc:
         exc_type_name = type(exc).__name__
         if "recursion" in exc_type_name.lower() or "RecursionError" in exc_type_name:
@@ -190,10 +205,13 @@ def executor_node(state: "AgentState") -> "AgentState":
             f"Step '{current_step}' execution failed: {exc}"
         ) from exc
 
-    # Parse the inner output back to execution log records
+    # 将内部输出解析回执行日志记录
+    # 仅从此次调用新生成的消息中提取
+    # 历史输入消息已记录在日志中
     raw_messages: list = react_output.get("messages", [])
     normalised = _normalize_output_messages(raw_messages)
-    new_records = _extract_execution_result(normalised, current_step)
+    new_messages = normalised[input_message_count:]
+    new_records = _extract_execution_result(new_messages, current_step)
 
     state["execution_log"].extend(new_records)
     state["current_step_index"] += 1
