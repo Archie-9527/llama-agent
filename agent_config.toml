@@ -1,0 +1,62 @@
+# llama-agent 默认配置文件
+# 此文件会被 config.py 自动探测加载（搜索路径：当前目录、~/.config/llama-agent/）
+# 命令行参数 > 环境变量 > 本文件 > 代码默认值
+
+# ---------------------------------------------------------------------------
+# 编排层 / CLI 层配置
+# ---------------------------------------------------------------------------
+[agent]
+# 最大计划-反思循环次数（安全兜底，防止无限循环）
+max_iterations = 6
+
+# Checkpoint 数据库路径（持久化 AgentState，支持崩溃恢复与 resume）
+db_path = "data/checkpoints.sqlite"
+
+# 最近 thread_id 记录文件（用于免参数 resume）
+last_thread_file = "data/last_thread_id.txt"
+
+# 日志级别：DEBUG / INFO / WARNING / ERROR
+log_level = "INFO"
+
+# ---------------------------------------------------------------------------
+# 推理内核配置（映射到 ChatLlamaCpp / llama-cpp-python 构造参数）
+# ---------------------------------------------------------------------------
+[engine]
+# [必填] GGUF 模型文件路径
+model_path = "./models/Qwen3.5-4B-UD-Q8_K_XL.gguf"
+
+# 上下文窗口大小（token 数）
+n_ctx = 10000
+
+# GPU 层数（0 = 纯CPU；-1 = 全部offload到GPU）
+n_gpu_layers = 0
+
+# 批处理大小
+n_batch = 512
+
+# CPU 线程数
+n_threads = 8
+
+# 对话模板格式（chatml / llama-2 / mistral 等）
+chat_format = "chatml"
+
+# 采样温度（0.0 = 贪婪解码，越高越随机）
+temperature = 0.7
+
+# Top-p（nucleus）采样
+top_p = 0.9
+
+# Top-k 采样
+top_k = 40
+
+# 重复惩罚
+repeat_penalty = 1.1
+
+# 单次推理最大生成 token 数
+max_tokens = 512
+
+# 是否启用 verbose 日志（大量 llama.cpp 内部输出）
+verbose = false
+
+# 单次推理超时时间（秒）
+request_timeout = 60.0

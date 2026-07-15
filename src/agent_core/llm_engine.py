@@ -30,6 +30,9 @@ import llama_cpp.llama_chat_format as llama_chat_format
 
 from agent_core.exceptions import (
     AgentEngineError,
+    EngineAlreadyInitializedError,
+    EngineConfigError,
+    EngineNotInitializedError,
     InferenceTimeoutError,
     ModelLoadError,
 )
@@ -430,30 +433,120 @@ class ChatLlamaCpp(BaseChatModel):
 
 
 # ---------------------------------------------------------------------------
-# [STABLE] Global singleton
+# [STABLE] EngineConfig — typed contract for ChatLlamaCpp construction
+# ---------------------------------------------------------------------------
+
+from dataclasses import dataclass, asdict
+
+
+@dataclass(frozen=True)
+class EngineConfig:
+    """Typed, immutable configuration for ``ChatLlamaCpp``.
+
+    This is the single place that declares which parameters the engine
+    needs.  Field names must stay in sync with ``ChatLlamaCpp``'s
+    pydantic fields.
+
+    ``model_path`` is the only field without a default — it must be
+    provided by the caller.
+    """
+
+    model_path: str
+    n_ctx: int = 4096
+    n_gpu_layers: int = 0
+    n_batch: int = 512
+    n_threads: int = 8
+    chat_format: str = "chatml"
+    temperature: float = 0.7
+    top_p: float = 0.9
+    top_k: int = 40
+    repeat_penalty: float = 1.1
+    max_tokens: int = 512
+    stop: Optional[List[str]] = None
+    verbose: bool = False
+    request_timeout: float = 60.0
+
+    def validate(self) -> None:
+        """Fail-fast check before constructing the expensive ``ChatLlamaCpp``.
+
+        Raises:
+            EngineConfigError: If ``model_path`` is empty or whitespace-only.
+        """
+        if not self.model_path or not self.model_path.strip():
+            raise EngineConfigError(
+                "EngineConfig.model_path is missing or empty. "
+                "Provide it via the [engine] section of your TOML config file, "
+                "the AGENT_MODEL_PATH environment variable, or the "
+                "--model-path CLI argument."
+            )
+
+
+# ---------------------------------------------------------------------------
+# [STABLE] Global singleton — initialise once, get many times
 # ---------------------------------------------------------------------------
 
 _engine_instance: Optional[ChatLlamaCpp] = None
 _engine_lock = threading.Lock()
 
 
-def get_engine(config: Optional[Dict[str, Any]] = None) -> ChatLlamaCpp:
-    """Return (or create) the process-wide ``ChatLlamaCpp`` singleton.
+def initialize_engine(config: EngineConfig) -> ChatLlamaCpp:
+    """One-shot, process-level engine initialisation.
 
-    Loading a GGUF model is expensive (seconds to tens of seconds); every
-    ``graph/`` node shares the same instance.  The internal lock guarantees
-    that multiple racing callers cannot accidentally load the model twice.
+    Must be called by the CLI layer (``cli.py``) during startup, before
+    any ``graph/`` node attempts to call ``get_engine()``.
+
+    Args:
+        config: Fully merged ``EngineConfig`` (all four layers resolved).
+
+    Returns:
+        The newly created ``ChatLlamaCpp`` singleton instance.
+
+    Raises:
+        EngineConfigError: ``config.model_path`` is missing or empty.
+        EngineAlreadyInitializedError: The singleton was already created.
+        ModelLoadError: The underlying ``llama_cpp.Llama`` constructor failed.
     """
     global _engine_instance
 
-    if _engine_instance is not None:
-        return _engine_instance
+    config.validate()
 
     with _engine_lock:
-        # Double-checked locking — another thread may have created it while we waited
         if _engine_instance is not None:
-            return _engine_instance
-
-        cfg = config or {}
-        _engine_instance = ChatLlamaCpp(**cfg)
+            raise EngineAlreadyInitializedError(
+                "initialize_engine() has already been called — the engine "
+                "singleton exists and must not be silently replaced.  "
+                "Use _reset_engine_for_testing() in test fixtures."
+            )
+        _engine_instance = ChatLlamaCpp(**asdict(config))
         return _engine_instance
+
+
+def get_engine() -> ChatLlamaCpp:
+    """Return the previously initialised engine singleton.
+
+    This function accepts **no arguments**.  If the engine has not been
+    initialised yet it raises ``EngineNotInitializedError`` rather than
+    silently constructing one with default (empty) parameters.
+
+    Raises:
+        EngineNotInitializedError: ``initialize_engine()`` has not been
+            called yet.
+    """
+    if _engine_instance is None:
+        raise EngineNotInitializedError(
+            "get_engine() was called before initialize_engine() completed.  "
+            "Make sure cli.py calls initialize_engine(EngineConfig(...)) "
+            "during startup before any graph node tries to invoke the LLM."
+        )
+    return _engine_instance
+
+
+def _reset_engine_for_testing() -> None:
+    """[TEST-ONLY] Clear the singleton so a fresh engine can be created.
+
+    Do **not** call this from production code.  The leading underscore
+    and the name suffix are deliberate signals that this is a test hook.
+    """
+    global _engine_instance
+    with _engine_lock:
+        _engine_instance = None

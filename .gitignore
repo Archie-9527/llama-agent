@@ -119,3 +119,6 @@ scratch/
 node_modules
 gha-creds-*.json
 llm-env/
+
+*.sqlite
+*_thread_id.txt

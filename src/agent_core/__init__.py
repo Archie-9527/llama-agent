@@ -1,10 +1,19 @@
 """Agent core — local LLM inference, grammar constraints, and agent orchestration."""
 
-from agent_core.llm_engine import ChatLlamaCpp, get_engine, compile_json_schema_to_gbnf
+from agent_core.llm_engine import (
+    ChatLlamaCpp,
+    EngineConfig,
+    compile_json_schema_to_gbnf,
+    get_engine,
+    initialize_engine,
+)
 from agent_core.exceptions import (
     AgentCoreError,
     AgentEngineError,
     ContextBudgetExceededError,
+    EngineAlreadyInitializedError,
+    EngineConfigError,
+    EngineNotInitializedError,
     ExecutionError,
     GrammarCompileError,
     GraphOrchestrationError,
@@ -16,15 +25,30 @@ from agent_core.exceptions import (
     ToolConsistencyError,
 )
 
+from agent_core.config import AppConfig, load_app_config, load_engine_config
 from agent_core.session import RunConfig, TaskRunner
 
 __all__ = [
+    # engine
     "ChatLlamaCpp",
-    "get_engine",
+    "EngineConfig",
     "compile_json_schema_to_gbnf",
+    "get_engine",
+    "initialize_engine",
+    # config
+    "AppConfig",
+    "load_app_config",
+    "load_engine_config",
+    # session
+    "RunConfig",
+    "TaskRunner",
+    # exceptions
     "AgentCoreError",
     "AgentEngineError",
     "ContextBudgetExceededError",
+    "EngineAlreadyInitializedError",
+    "EngineConfigError",
+    "EngineNotInitializedError",
     "ExecutionError",
     "GrammarCompileError",
     "GraphOrchestrationError",
@@ -33,7 +57,5 @@ __all__ = [
     "PlanningError",
     "PromptAssemblyError",
     "ReflectionError",
-    "RunConfig",
-    "TaskRunner",
     "ToolConsistencyError",
 ]

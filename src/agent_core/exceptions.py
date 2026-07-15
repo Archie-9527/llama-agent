@@ -78,3 +78,20 @@ class ExecutionError(GraphOrchestrationError):
 class ReflectionError(GraphOrchestrationError):
     """Reflector produced a decision outside the valid enum set
     (``done`` / ``continue`` / ``failed``)."""
+
+
+# ── Engine lifecycle (llm_engine.py v2 refactor) ─────────────────────────────
+
+
+class EngineNotInitializedError(AgentEngineError):
+    """``get_engine()`` was called before ``initialize_engine()`` completed."""
+
+
+class EngineAlreadyInitializedError(AgentEngineError):
+    """``initialize_engine()`` was called more than once — the singleton
+    already exists and must not be silently replaced."""
+
+
+class EngineConfigError(AgentEngineError):
+    """``EngineConfig`` is missing a required field (e.g. ``model_path``)
+    or contains an illegal value."""
