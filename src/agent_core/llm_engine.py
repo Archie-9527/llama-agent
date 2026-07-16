@@ -62,9 +62,16 @@ def _convert_messages_to_llama_format(
         elif role == "human":
             role = "user"
 
+        content: str
+        if isinstance(msg.content, str):
+            content = msg.content
+        else:
+            # 某些消息类型 content 可能是 list[dict]（多模态），此处转为 JSON 字符串兜底
+            content = json.dumps(msg.content, ensure_ascii=False)
+
         entry: llama_cpp.llama_types.ChatCompletionRequestMessage = {
             "role": role,  # type: ignore[typeddict-item]
-            "content": msg.content,
+            "content": content,
         }
 
         # Forward tool_calls from assistant messages
@@ -87,6 +94,31 @@ def _convert_messages_to_llama_format(
 
         result.append(entry)
     return result
+
+
+def _ensure_tool_messages_visible(
+    messages: List[llama_cpp.llama_types.ChatCompletionRequestMessage],
+) -> List[llama_cpp.llama_types.ChatCompletionRequestMessage]:
+    """将 ``role="tool"`` 的消息改写为 ``role="user"``，防止简单 chat format
+    处理器（如 ``format_qwen``）在 ``tools=None`` 时静默丢弃工具结果。
+
+    当传入 ``tools`` 参数时不应调用此函数——llama-cpp-python 会走 Jinja2 模板
+    路径，原生支持 tool role。
+    """
+    rewritten: List[llama_cpp.llama_types.ChatCompletionRequestMessage] = []
+    for msg in messages:
+        if msg.get("role") == "tool":
+            tool_call_id = msg.get("tool_call_id", "unknown")
+            tool_content = msg.get("content", "")
+            rewritten.append({
+                "role": "user",
+                "content": (
+                    f"[工具执行结果 | tool_call_id={tool_call_id}]\n{tool_content}"
+                ),
+            })  # type: ignore[arg-type]
+        else:
+            rewritten.append(msg)
+    return rewritten
 
 def _convert_llama_response_to_aimessage(
     response: llama_cpp.llama_types.CreateChatCompletionResponse,
@@ -288,7 +320,7 @@ class ChatLlamaCpp(BaseChatModel):
         """
         from langchain_core.utils.function_calling import convert_to_openai_tool
 
-        stored_tools: List[Dict[str, Any]] = list(kwargs.pop("_stored_tools", []))
+        stored_tools: List[Dict[str, Any]] = []
         for t in tools:
             if isinstance(t, dict):
                 stored_tools.append(t)
@@ -296,8 +328,11 @@ class ChatLlamaCpp(BaseChatModel):
                 stored_tools.append(convert_to_openai_tool(t))  # type: ignore[arg-type]
             elif callable(t):
                 stored_tools.append(convert_to_openai_tool(t))  # type: ignore[arg-type]
+        bind_kwargs = dict(kwargs)
+        if tool_choice is not None:
+            bind_kwargs["tool_choice"] = tool_choice
 
-        return self.bind(tools=stored_tools, **kwargs)
+        return self.bind(tools=stored_tools, **bind_kwargs)
 
     # ------------------------------------------------------------------
     # [STABLE] Synchronous inference
@@ -328,6 +363,11 @@ class ChatLlamaCpp(BaseChatModel):
             else None
         )
 
+        # 当 tools=None 时，简单 chat format 处理器会丢弃 role="tool" 的消息。
+        # 将 tool 消息改写为 user 消息，确保工具执行结果不被静默丢失。
+        if llama_tools is None:
+            llama_messages = _ensure_tool_messages_visible(llama_messages)
+
         # Stop tokens
         combined_stop = list(self.stop or [])
         if stop:
@@ -342,6 +382,7 @@ class ChatLlamaCpp(BaseChatModel):
                 response = self._client.create_chat_completion(
                     messages=llama_messages,  # type: ignore[arg-type]
                     tools=llama_tools,  # type: ignore[arg-type]
+                    tool_choice=kwargs.get("tool_choice"),
                     temperature=kwargs.get("temperature", self.temperature),
                     top_p=kwargs.get("top_p", self.top_p),
                     top_k=kwargs.get("top_k", self.top_k),
@@ -383,6 +424,10 @@ class ChatLlamaCpp(BaseChatModel):
             if langchain_tools
             else None
         )
+
+        # 当 tools=None 时，将 tool 消息改写为 user 消息（同 _generate 的逻辑）
+        if llama_tools is None:
+            llama_messages = _ensure_tool_messages_visible(llama_messages)
 
         combined_stop = list(self.stop or [])
         if stop:
@@ -456,7 +501,7 @@ class EngineConfig:
     n_gpu_layers: int = 0
     n_batch: int = 512
     n_threads: int = 8
-    chat_format: str = "chatml"
+    chat_format: str = None
     temperature: float = 0.7
     top_p: float = 0.9
     top_k: int = 40
