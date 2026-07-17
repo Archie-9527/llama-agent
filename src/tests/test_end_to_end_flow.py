@@ -45,13 +45,16 @@ class FakeEngine:
     """
     def __init__(self, plan_steps, reflection_decision="done"):
         self.call_log = []
+        self._structured_calls = 0
         self._plan_steps = plan_steps
         self._reflection_decision = reflection_decision
 
     def invoke(self, messages, grammar=None, **kwargs):
         self.call_log.append(messages)
-        call_index = len(self.call_log)
-        if call_index % 2 == 1:
+        if grammar is None:
+            return FakeAIMessage("基于全部真实记录生成的最终答案")
+        self._structured_calls += 1
+        if self._structured_calls % 2 == 1:
             return FakeAIMessage(json.dumps({"steps": self._plan_steps}))
         return FakeAIMessage(json.dumps(self._reflection_decision))
 
@@ -101,6 +104,7 @@ def patched_env(monkeypatch):
     monkeypatch.setattr("agent_core.graph.planner.get_engine", lambda: fake_engine)
     monkeypatch.setattr("agent_core.graph.reflector.get_engine", lambda: fake_engine)
     monkeypatch.setattr("agent_core.graph.executor.get_engine", lambda: fake_engine)
+    monkeypatch.setattr("agent_core.graph.finalizer.get_engine", lambda: fake_engine)
     monkeypatch.setattr("agent_core.graph.react_agent_factory.initialize_react_agent", lambda: fake_react_agent)
 
     return fake_engine, fake_react_agent

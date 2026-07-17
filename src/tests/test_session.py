@@ -79,6 +79,8 @@ class TestInitialState:
             "status",
             "max_iterations",
             "current_iteration",
+            "final_answer",
+            "error",
         }
         assert _state_keys(state) == expected_keys
 
@@ -92,6 +94,8 @@ class TestInitialState:
         assert state["status"] == "planning"
         assert state["current_iteration"] == 0
         assert state["max_iterations"] == tmp_runner.config.max_iterations
+        assert state["final_answer"] == ""
+        assert state["error"] is None
 
     def test_different_goals_produce_different_states(self, tmp_runner):
         s1 = tmp_runner._build_initial_state("goal one")

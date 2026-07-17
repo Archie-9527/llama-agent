@@ -92,6 +92,11 @@ def reflector_node(state: "AgentState") -> "AgentState":
             "before the task was completed"
         )
         state["status"] = "failed"
+        state["error"] = {
+            "node": "reflector",
+            "type": "IterationLimitExceeded",
+            "message": f"max_iterations={max_iterations} reached",
+        }
     else:
         state["status"] = decision
 

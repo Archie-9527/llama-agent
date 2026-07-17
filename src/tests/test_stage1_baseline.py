@@ -1,0 +1,243 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from unittest.mock import MagicMock
+from unittest.mock import patch
+
+from agent_core.benchmark.aggregator import aggregate_run
+from agent_core.benchmark.evaluator import evaluate
+from agent_core.benchmark.models import BenchmarkCase, BenchmarkSuite
+from agent_core.conversation.manager import ConversationConfig, ConversationManager
+from agent_core.conversation.store import ConversationStore
+from agent_core.telemetry.kv_monitor import sample_kv
+from agent_core.telemetry.models import TelemetryConfig
+from agent_core.graph.finalizer import finalizer_node
+from agent_core.llm_engine import (
+    _append_no_think_marker,
+    _convert_llama_response_to_aimessage,
+    _strip_thinking_content,
+)
+from agent_core.config import load_memory_config, load_telemetry_config
+
+
+def test_conversation_store_running_then_done(tmp_path: Path):
+    store = ConversationStore(tmp_path / "conversations.sqlite")
+    try:
+        store.create_conversation("c1")
+        running = store.create_running_turn(
+            turn_id="t1",
+            conversation_id="c1",
+            thread_id="thread1",
+            user_input="hello",
+        )
+        assert running.status == "running"
+        done = store.finish_turn(
+            "t1", status="done", assistant_output="world"
+        )
+        assert done.assistant_output == "world"
+        assert store.get_turn_by_thread("thread1") == done
+    finally:
+        store.close()
+
+
+def test_conversation_history_is_recent_and_budgeted(tmp_path: Path):
+    store = ConversationStore(tmp_path / "conversations.sqlite")
+    store.create_conversation("c1")
+    for index in range(3):
+        store.create_running_turn(
+            turn_id=f"t{index}",
+            conversation_id="c1",
+            thread_id=f"thread{index}",
+            user_input=f"u{index}",
+        )
+        store.finish_turn(
+            f"t{index}", status="done", assistant_output=f"a{index}"
+        )
+    runner = MagicMock()
+    engine = MagicMock()
+    engine.get_num_tokens.side_effect = lambda text: len(text)
+    manager = ConversationManager(
+        runner,
+        store,
+        engine,
+        ConversationConfig(history_turns=2, history_token_budget=10_000),
+    )
+    history = manager._render_history("c1")
+    assert "u0" not in history
+    assert "u1" in history and "u2" in history
+    store.close()
+
+
+def test_kv_snapshot_falls_back_cleanly():
+    class Client:
+        n_tokens = 12
+
+        @staticmethod
+        def n_ctx():
+            return 128
+
+    client = Client()
+    snapshot = sample_kv(client)
+    assert snapshot.logical_tokens == 12
+    assert snapshot.capacity_tokens == 128
+    assert isinstance(snapshot.supported, bool)
+
+
+def test_telemetry_config_rejects_busy_sampling():
+    config = TelemetryConfig(sample_interval_ms=1)
+    try:
+        config.validate()
+    except ValueError as exc:
+        assert "sample_interval_ms" in str(exc)
+    else:
+        raise AssertionError("expected validation error")
+
+
+def test_benchmark_suite_and_evaluator(tmp_path: Path):
+    suite_path = tmp_path / "suite.json"
+    suite_path.write_text(
+        json.dumps(
+            {
+                "name": "tiny",
+                "warmup_runs": 0,
+                "measured_runs": 1,
+                "cases": [
+                    {
+                        "case_id": "one",
+                        "category": "W1",
+                        "goal": "count",
+                        "expected_contains": ["42"],
+                        "expected_tools": ["count_lines"],
+                    }
+                ],
+            }
+        )
+    )
+    suite = BenchmarkSuite.load(suite_path)
+    result = {
+        "status": "done",
+        "final_answer": "answer is 42",
+        "execution_log": [{"tool_used": "count_lines"}],
+    }
+    assert evaluate(suite.cases[0], result)["passed"] is True
+
+
+def test_aggregator_keeps_failed_samples(tmp_path: Path):
+    records = [
+        {
+            "case_id": "a",
+            "category": "W1",
+            "duration_ms": 10,
+            "measured": True,
+            "repetition": 0,
+            "evaluation": {"passed": True},
+        },
+        {
+            "case_id": "b",
+            "category": "W1",
+            "duration_ms": 20,
+            "measured": True,
+            "repetition": 0,
+            "evaluation": {"passed": False},
+        },
+    ]
+    (tmp_path / "task_results.jsonl").write_text(
+        "\n".join(json.dumps(item) for item in records)
+    )
+    summary = aggregate_run(tmp_path)
+    assert summary["sample_count"] == 2
+    assert summary["failed_count"] == 1
+    assert summary["task_success_rate"] == 0.5
+
+
+def test_case_round_trip():
+    case = BenchmarkCase(
+        case_id="c",
+        category="W5",
+        turns=("one", "two"),
+        tasks=("a", "b"),
+        concurrency=2,
+    )
+    assert BenchmarkCase.from_dict(case.to_dict()) == case
+
+
+def test_finalizer_sets_stable_answer():
+    engine = MagicMock()
+    engine.invoke.return_value.content = "完整最终答案"
+    state = {
+        "task_goal": "goal",
+        "plan_steps": ["step", "step 2"],
+        "execution_log": [{"step": "step", "result": "ok", "tool_used": None}],
+        "status": "done",
+        "final_answer": "",
+    }
+    with (
+        patch("agent_core.graph.finalizer.get_engine", return_value=engine),
+        patch(
+            "agent_core.graph.finalizer.assemble_finalization_prompt",
+            return_value=[],
+        ),
+    ):
+        result = finalizer_node(state)
+    assert result["final_answer"] == "完整最终答案"
+
+
+def test_llama_usage_is_preserved():
+    message = _convert_llama_response_to_aimessage(
+        {
+            "model": "local",
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {"role": "assistant", "content": "ok"},
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 2,
+                "total_tokens": 12,
+            },
+        }
+    )
+    assert message.usage_metadata["input_tokens"] == 10
+    assert message.response_metadata["finish_reason"] == "stop"
+
+
+def test_thinking_blocks_are_not_user_visible():
+    visible, reasoning = _strip_thinking_content(
+        "<think>private reasoning</think>\n文件共有 698 行。"
+    )
+    assert visible == "文件共有 698 行。"
+    assert reasoning == "private reasoning"
+
+
+def test_unfinished_thinking_is_not_an_answer():
+    visible, reasoning = _strip_thinking_content(
+        "<think>Thinking Process: generation was truncated"
+    )
+    assert visible == ""
+    assert "generation was truncated" in reasoning
+
+
+def test_no_think_marker_does_not_mutate_input():
+    messages = [{"role": "user", "content": "hello"}]
+    output = _append_no_think_marker(messages)
+    assert output[-1]["content"].endswith("/no_think")
+    assert messages[-1]["content"] == "hello"
+
+
+def test_stage1_config_sections_load(tmp_path: Path):
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        """
+[telemetry]
+enabled = true
+sample_interval_ms = 250
+[memory]
+artifact_virtualization = false
+kv_lifecycle = false
+"""
+    )
+    assert load_telemetry_config(config_file).enabled is True
+    assert load_memory_config(config_file).kv_lifecycle is False

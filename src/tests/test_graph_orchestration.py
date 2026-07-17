@@ -585,14 +585,13 @@ class TestRoutingFunctions:
         assert _route_after_executor(state) == "reflector"
 
     def test_route_after_reflector_done(self):
-        """A10: Reflector says 'done' → END."""
+        """A10: Reflector says 'done' → stable-answer Finalizer."""
         state = AgentState(
             task_goal="t", plan_steps=["a"], current_step_index=1,
             execution_log=[], reflection_notes=[],
             status="done", max_iterations=10, current_iteration=0,
         )
-        from langgraph.graph import END
-        assert _route_after_reflector(state) == END
+        assert _route_after_reflector(state) == "finalizer"
 
     def test_route_after_reflector_failed(self):
         """Reflector says 'failed' → END."""
@@ -970,6 +969,8 @@ class TestArchitectureIsolation:
             "task_goal", "plan_steps", "current_step_index",
             "execution_log", "reflection_notes", "status",
             "max_iterations", "current_iteration",
+            "final_answer",
+            "error",
         }
         assert set(hints.keys()) == required
 

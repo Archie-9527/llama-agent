@@ -25,6 +25,8 @@ class AgentState(TypedDict):
             ``reflecting``, ``done``, or ``failed``.
         max_iterations: Safety cap on planning-reflecting loops.
         current_iteration: How many plan→reflect cycles have run so far.
+        final_answer: Stable, user-facing result created by the Finalizer.
+        error: Structured terminal failure, or ``None``.
     """
 
     task_goal: str
@@ -35,3 +37,5 @@ class AgentState(TypedDict):
     status: str  # "planning" | "executing" | "reflecting" | "done" | "failed"
     max_iterations: int
     current_iteration: int
+    final_answer: str
+    error: dict | None

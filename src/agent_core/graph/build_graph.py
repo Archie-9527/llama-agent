@@ -27,6 +27,7 @@ from langgraph.graph import END, StateGraph
 
 from agent_core.exceptions import AgentCoreError
 from agent_core.graph.executor import executor_node
+from agent_core.graph.finalizer import finalizer_node
 from agent_core.graph.planner import planner_node
 from agent_core.graph.reflector import reflector_node
 from agent_core.graph.state import AgentState
@@ -46,6 +47,8 @@ _STATE_DEFAULTS: dict[str, Callable[[], object]] = {
     "current_iteration": lambda: 0,
     "max_iterations": lambda: 10,
     "status": lambda: "planning",
+    "final_answer": str,
+    "error": lambda: None,
 }
 
 
@@ -78,6 +81,11 @@ def _fail_state(state: AgentState, node_name: str, exc: Exception) -> AgentState
     notes.append(f"[error in {node_name}] {type(exc).__name__}: {exc}")
     state["reflection_notes"] = notes
     state["status"] = "failed"
+    state["error"] = {
+        "node": node_name,
+        "type": type(exc).__name__,
+        "message": str(exc),
+    }
     return state
 
 
@@ -97,7 +105,10 @@ def _with_error_isolation(
         @wraps(node_fn)
         def wrapped(state: AgentState, config) -> AgentState:
             try:
-                return node_fn(state, config)
+                from agent_core.telemetry import telemetry_phase
+
+                with telemetry_phase(node_name):
+                    return node_fn(state, config)
             except AgentCoreError as exc:
                 return _fail_state(state, node_name, exc)
 
@@ -106,7 +117,10 @@ def _with_error_isolation(
     @wraps(node_fn)
     def wrapped(state: AgentState) -> AgentState:
         try:
-            return node_fn(state)
+            from agent_core.telemetry import telemetry_phase
+
+            with telemetry_phase(node_name):
+                return node_fn(state)
         except AgentCoreError as exc:
             return _fail_state(state, node_name, exc)
 
@@ -150,7 +164,9 @@ def _route_after_reflector(state: AgentState) -> str:
     current_iteration: int = state.get("current_iteration", 0)
     max_iterations: int = state.get("max_iterations", 10)
 
-    if status in ("done", "failed"):
+    if status == "done":
+        return "finalizer"
+    if status == "failed":
         return END
 
     if current_iteration >= max_iterations:
@@ -196,12 +212,14 @@ def build_graph(
     safe_planner = _with_error_isolation(planner_node, "planner")
     safe_executor = _with_error_isolation(executor_node, "executor")
     safe_reflector = _with_error_isolation(reflector_node, "reflector")
+    safe_finalizer = _with_error_isolation(finalizer_node, "finalizer")
 
     # Register nodes
     graph.add_node("normalize_state", _normalize_entry_state)
     graph.add_node("planner", safe_planner)
     graph.add_node("executor", safe_executor)
     graph.add_node("reflector", safe_reflector)
+    graph.add_node("finalizer", safe_finalizer)
 
     # Entry point
     graph.set_entry_point("normalize_state")
@@ -227,7 +245,8 @@ def build_graph(
     graph.add_conditional_edges(
         "reflector",
         _route_after_reflector,
-        {"planner": "planner", END: END},
+        {"planner": "planner", "finalizer": "finalizer", END: END},
     )
+    graph.add_edge("finalizer", END)
 
     return graph.compile(checkpointer=checkpointer)

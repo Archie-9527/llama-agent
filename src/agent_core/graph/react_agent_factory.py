@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
+from time import monotonic_ns
 from typing import Annotated
 
 from langchain.agents import create_agent  # type: ignore[import-untyped]
@@ -32,6 +33,35 @@ from typing_extensions import TypedDict
 
 from agent_core.capability_registry import Capability, get_capability, list_capabilities
 from agent_core.llm_engine import get_engine
+
+
+def _run_capability(cap: Capability, kwargs: dict) -> object:
+    """Execute one capability and emit a stable tool event."""
+    from agent_core.telemetry import get_telemetry
+
+    telemetry = get_telemetry()
+    started = monotonic_ns()
+    try:
+        result = cap.handler(**kwargs)
+    except Exception as exc:
+        telemetry.record_event(
+            "tool_events.jsonl",
+            "tool_failed",
+            tool_name=cap.name,
+            duration_ms=(monotonic_ns() - started) / 1_000_000,
+            input_bytes=len(str(kwargs).encode("utf-8")),
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        raise
+    telemetry.record_event(
+        "tool_events.jsonl",
+        "tool_completed",
+        tool_name=cap.name,
+        duration_ms=(monotonic_ns() - started) / 1_000_000,
+        input_bytes=len(str(kwargs).encode("utf-8")),
+        output_bytes=len(str(result).encode("utf-8")),
+    )
+    return result
 
 # ---------------------------------------------------------------------------
 # Feature flag
@@ -77,7 +107,7 @@ def to_langchain_tool(cap: Capability) -> BaseTool:
     # Wrap the raw handler so LangChain sees a proper callable signature.
     # We use **kwargs because create_model gives us keyword-only fields.
     def _handler(**kwargs):
-        return cap.handler(**kwargs)
+        return _run_capability(cap, kwargs)
 
     # If the schema has no properties, create a simple no-arg tool.
     if not fields:
@@ -95,7 +125,7 @@ def to_langchain_tool(cap: Capability) -> BaseTool:
         args_schema: type = ArgsModel
 
         def _run(self, **kwargs):
-            return cap.handler(**kwargs)
+            return _run_capability(cap, kwargs)
 
     return _StructuredTool()
 
@@ -219,7 +249,7 @@ def _tool_node(state: _ReActState) -> dict:
     for call in last_message.tool_calls:
         try:
             capability = get_capability(call["name"])
-            result = capability.handler(**call["args"])
+            result = _run_capability(capability, call["args"])
         except Exception as exc:
             result = f"Tool error: {exc}"
         results.append(
