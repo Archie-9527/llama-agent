@@ -29,6 +29,7 @@ PLAN_SCHEMA: dict = {
         "steps": {
             "type": "array",
             "items": {"type": "string"},
+            "minItems": 1,
             "description": "Ordered list of executable steps.",
         }
     },

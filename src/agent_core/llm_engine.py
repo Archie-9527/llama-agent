@@ -23,7 +23,7 @@ from langchain_core.messages.tool import ToolCall
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
-from pydantic import Field, PrivateAttr
+from pydantic import ConfigDict, Field, PrivateAttr
 
 import llama_cpp
 import llama_cpp.llama_chat_format as llama_chat_format
@@ -237,8 +237,7 @@ class ChatLlamaCpp(BaseChatModel):
     _client: Optional[llama_cpp.Llama] = PrivateAttr(default=None)
     _lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     # ------------------------------------------------------------------
     # Construction — eager model loading (fail-fast)
@@ -329,8 +328,23 @@ class ChatLlamaCpp(BaseChatModel):
             elif callable(t):
                 stored_tools.append(convert_to_openai_tool(t))  # type: ignore[arg-type]
         bind_kwargs = dict(kwargs)
-        if tool_choice is not None:
-            bind_kwargs["tool_choice"] = tool_choice
+
+        # LangChain's create_agent() binds ordinary tools with
+        # ``tool_choice=None``.  llama-cpp-python's
+        # ``chatml-function-calling`` handler interprets None as the
+        # *no-tools* branch, even when tool schemas are present.  In that
+        # branch the model only sees our human-readable prompt and tends to
+        # print pseudo calls such as ``tool_name(...)`` as plain text.
+        #
+        # OpenAI-style "auto" is the correct default for a ReAct agent: the
+        # model may either call a tool or return a normal message, while the
+        # handler emits a structured ``tool_calls`` response for the former.
+        resolved_tool_choice = tool_choice if tool_choice is not None else "auto"
+        # LangChain uses "any"/"required" for forced tool selection, while
+        # llama-cpp-python 0.3.x accepts "auto" or a concrete function dict.
+        if resolved_tool_choice in ("any", "required"):
+            resolved_tool_choice = "auto"
+        bind_kwargs["tool_choice"] = resolved_tool_choice
 
         return self.bind(tools=stored_tools, **bind_kwargs)
 

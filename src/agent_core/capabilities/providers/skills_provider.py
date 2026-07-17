@@ -17,6 +17,7 @@ Design:
 
 from __future__ import annotations
 
+import json
 import logging
 import shlex
 import subprocess
@@ -38,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class SkillsToolConfig:
-    skills_dir: Path = Path("agent_core/capabilities/skills")
+    skills_dir: Path = Path("src/agent_core/capabilities/skills")
     default_timeout_seconds: float = 15.0
 
 # ---------------------------------------------------------------------------
@@ -63,12 +64,44 @@ def _build_shell_template_handler(
                 timeout=config.default_timeout_seconds,
                 shell=False,
             )
-            output = (result.stdout or "") + (result.stderr or "")
-            return output or "(command succeeded, no output)"
+            return json.dumps(
+                {
+                    "success": result.returncode == 0,
+                    "exit_code": result.returncode,
+                    "stdout": result.stdout or "",
+                    "stderr": result.stderr or "",
+                    "error": (
+                        None
+                        if result.returncode == 0
+                        else f"Skill command exited with status {result.returncode}."
+                    ),
+                },
+                ensure_ascii=False,
+            )
         except subprocess.TimeoutExpired:
-            return f"Skill timed out after {config.default_timeout_seconds}s."
+            return json.dumps(
+                {
+                    "success": False,
+                    "exit_code": None,
+                    "stdout": "",
+                    "stderr": "",
+                    "error": (
+                        f"Skill timed out after {config.default_timeout_seconds}s."
+                    ),
+                },
+                ensure_ascii=False,
+            )
         except (KeyError, ValueError, OSError) as exc:
-            return f"Skill execution failed: {exc}"
+            return json.dumps(
+                {
+                    "success": False,
+                    "exit_code": None,
+                    "stdout": "",
+                    "stderr": "",
+                    "error": f"Skill execution failed: {exc}",
+                },
+                ensure_ascii=False,
+            )
 
     return _runner
 
@@ -147,8 +180,14 @@ class SkillsCapabilityProvider(CapabilityProvider):
 
     def build(self, raw_config: dict[str, Any]) -> list[Capability]:
         try:
-            config = SkillsToolConfig(**raw_config)
-        except TypeError as exc:
+            normalized_config = dict(raw_config)
+            if "skills_dir" in normalized_config:
+                raw_skills_dir = normalized_config["skills_dir"]
+                if not isinstance(raw_skills_dir, (str, Path)):
+                    raise TypeError("skills_dir must be a path string")
+                normalized_config["skills_dir"] = Path(raw_skills_dir)
+            config = SkillsToolConfig(**normalized_config)
+        except (TypeError, ValueError) as exc:
             raise ToolProviderConfigError(
                 f"skills provider config has invalid fields: {exc}"
             ) from exc

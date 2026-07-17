@@ -283,7 +283,7 @@ def assemble_planning_prompt(
     _validate_message_sequence(messages)
 
     # Budget management
-    n_ctx = state.get("n_ctx", 4096)
+    n_ctx = _context_window(state, engine)
     budget = n_ctx - reserved_for_generation
     messages = _apply_budget(messages, budget, engine)
 
@@ -335,7 +335,15 @@ def assemble_execution_prompt(
     execution_log: list[dict] = state.get("execution_log", [])
     history_msgs = _build_history_messages(execution_log)
 
-    raw: list[BaseMessage] = [sys_msg] + history_msgs
+    # Always end the initial input with the current step as a HumanMessage.
+    # Besides making the instruction explicit, this lets the ReAct middleware
+    # distinguish an old ToolMessage in history from a ToolMessage produced
+    # during the current inner loop.
+    raw: list[BaseMessage] = [
+        sys_msg,
+        *history_msgs,
+        HumanMessage(content=f"请执行当前步骤：{current_step}"),
+    ]
 
     # Append optional latest tool result
     if tool_result is not None:
@@ -362,7 +370,7 @@ def assemble_execution_prompt(
 
     _validate_message_sequence(raw)
 
-    n_ctx = state.get("n_ctx", 4096)
+    n_ctx = _context_window(state, engine)
     budget = n_ctx - reserved_for_generation
     return _apply_budget(raw, budget, engine)
 
@@ -400,7 +408,7 @@ def assemble_reflection_prompt(
     raw: list[BaseMessage] = [sys_msg]
     _validate_message_sequence(raw)
 
-    n_ctx = state.get("n_ctx", 4096)
+    n_ctx = _context_window(state, engine)
     budget = n_ctx - reserved_for_generation
     return _apply_budget(raw, budget, engine)
 
@@ -422,3 +430,17 @@ def _apply_budget(
         raise  # already the right type
     _validate_message_sequence(trimmed)
     return trimmed
+
+
+def _context_window(state: dict, engine: TokenCounter) -> int:
+    """Resolve the real context window used by the inference engine.
+
+    Older checkpoints may carry an explicit ``n_ctx`` field, so preserve it
+    when present.  Normal AgentState does not contain that field; in that
+    case use the engine configuration instead of silently falling back to a
+    hard-coded 4096-token window.
+    """
+    state_n_ctx = state.get("n_ctx")
+    if state_n_ctx is not None:
+        return int(state_n_ctx)
+    return int(getattr(engine, "n_ctx", 4096))

@@ -78,8 +78,21 @@ def reflector_node(state: "AgentState") -> "AgentState":
     reflection_notes: list[str] = state.get("reflection_notes", [])
     reflection_notes.append(note)
 
+    next_iteration = current_iteration + 1
     state["reflection_notes"] = reflection_notes
-    state["current_iteration"] = current_iteration + 1
-    state["status"] = decision
+    state["current_iteration"] = next_iteration
+
+    # Do not return a misleading non-terminal ``continue`` status when the
+    # safety cap has already been exhausted.  Mark the task as failed and
+    # leave an explicit diagnostic for CLI/API consumers.
+    max_iterations: int = state.get("max_iterations", 10)
+    if decision == "continue" and next_iteration >= max_iterations:
+        state["reflection_notes"].append(
+            f"[iteration limit] max_iterations={max_iterations} reached "
+            "before the task was completed"
+        )
+        state["status"] = "failed"
+    else:
+        state["status"] = decision
 
     return state

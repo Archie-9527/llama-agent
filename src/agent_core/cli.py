@@ -144,6 +144,14 @@ def _print_result(result: dict) -> None:
     for i, record in enumerate(result["execution_log"]):
         tag = f"[tool:{record['tool_used']}]" if record["tool_used"] else "[result]"
         print(f"  {i}. {tag} {record['result']}")
+    final_answers = [
+        record["result"]
+        for record in result["execution_log"]
+        if record.get("tool_used") is None and str(record.get("result", "")).strip()
+    ]
+    if final_answers:
+        print("Final answer:")
+        print(f"  {final_answers[-1]}")
     if result.get("reflection_notes"):
         print("Reflection notes:")
         for note in result["reflection_notes"]:

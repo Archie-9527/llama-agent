@@ -22,7 +22,9 @@ from functools import lru_cache
 from typing import Annotated
 
 from langchain.agents import create_agent  # type: ignore[import-untyped]
+from langchain.agents.middleware import wrap_model_call
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool, tool as langchain_tool_decorator
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
@@ -116,6 +118,35 @@ def _json_type_to_python(json_type: str) -> type:
 # ---------------------------------------------------------------------------
 
 
+@wrap_model_call
+def _summarize_after_tool(request, handler):
+    """Switch from tool selection to a tool-free summary call.
+
+    ``create_agent`` normally binds all tools again after every ToolMessage.
+    Small local models can consequently repeat the same call or emit a raw
+    protocol marker such as ``functions.count_lines:``.  Once a tool result is
+    available for the current step, remove all tools and explicitly ask the
+    model to answer from that real result.
+    """
+    if request.messages and isinstance(request.messages[-1], ToolMessage):
+        summary_request = request.override(
+            messages=[
+                *request.messages,
+                HumanMessage(
+                    content=(
+                        "工具已经执行完毕。请严格根据上面的真实工具结果，"
+                        "用自然语言总结当前步骤的最终答案。不要再次调用工具，"
+                        "不要输出 functions.<name>:、JSON 调用或调用说明。"
+                    )
+                ),
+            ],
+            tools=[],
+            tool_choice="none",
+        )
+        return handler(summary_request)
+    return handler(request)
+
+
 def _build_via_create_agent():
     """Build the ReAct inner graph via ``langchain.agents.create_agent``.
 
@@ -135,6 +166,7 @@ def _build_via_create_agent():
         system_prompt=None,
         response_format=None,
         checkpointer=None,
+        middleware=[_summarize_after_tool],
         debug=_AGENT_DEBUG,
         name="executor_inner_agent",
     )
@@ -155,10 +187,25 @@ class _ReActState(TypedDict):
 
 
 def _agent_node(state: _ReActState) -> dict:
-    """LLM-decision node: bind tools and call the model on current messages."""
-    tools = [to_langchain_tool(cap) for cap in list_capabilities()]
-    model_with_tools = get_engine().bind_tools(tools)
-    response: AIMessage = model_with_tools.invoke(state["messages"])  # type: ignore[assignment]
+    """Select a tool first, then summarize without tools after ToolMessage."""
+    messages = state["messages"]
+    engine = get_engine()
+    if messages and isinstance(messages[-1], ToolMessage):
+        response: AIMessage = engine.invoke(  # type: ignore[assignment]
+            [
+                *messages,
+                HumanMessage(
+                    content=(
+                        "工具已经执行完毕。请严格根据真实工具结果总结当前步骤，"
+                        "不要再次调用工具或输出工具协议标记。"
+                    )
+                ),
+            ]
+        )
+    else:
+        tools = [to_langchain_tool(cap) for cap in list_capabilities()]
+        model_with_tools = engine.bind_tools(tools)
+        response = model_with_tools.invoke(messages)  # type: ignore[assignment]
     return {"messages": [response]}
 
 

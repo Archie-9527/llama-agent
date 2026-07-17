@@ -10,6 +10,7 @@ Safety invariants:
 
 from __future__ import annotations
 
+import json
 import shlex
 import subprocess
 from dataclasses import dataclass, field
@@ -46,19 +47,62 @@ class ShellCapabilityProvider(CapabilityProvider):
                 f"shell provider config has invalid fields: {exc}"
             ) from exc
 
+        def _result(
+            *,
+            success: bool,
+            command: str,
+            exit_code: int | None = None,
+            stdout: str = "",
+            stderr: str = "",
+            error: str | None = None,
+        ) -> str:
+            """Return a stable, machine-readable result to the model."""
+            combined_length = len(stdout) + len(stderr)
+            if combined_length > config.max_output_chars:
+                remaining = config.max_output_chars
+                stdout = stdout[:remaining]
+                remaining -= len(stdout)
+                stderr = stderr[:max(remaining, 0)]
+                truncation = f"output truncated from {combined_length} characters"
+                error = f"{error}; {truncation}" if error else truncation
+
+            return json.dumps(
+                {
+                    "success": success,
+                    "command": command,
+                    "exit_code": exit_code,
+                    "stdout": stdout,
+                    "stderr": stderr,
+                    "error": error,
+                },
+                ensure_ascii=False,
+            )
+
         def _execute_shell_command(command: str) -> str:
             try:
                 parts = shlex.split(command)
             except ValueError as exc:
-                return f"Command parse error: {exc}"
+                return _result(
+                    success=False,
+                    command=command,
+                    error=f"Command parse error: {exc}",
+                )
 
             if not parts:
-                return "Empty command — nothing executed."
+                return _result(
+                    success=False,
+                    command=command,
+                    error="Empty command — nothing executed.",
+                )
 
             if parts[0] not in config.allowed_commands:
-                return (
-                    f"Command '{parts[0]}' is not in the allowlist "
-                    f"({', '.join(config.allowed_commands)})."
+                return _result(
+                    success=False,
+                    command=command,
+                    error=(
+                        f"Command '{parts[0]}' is not in the allowlist "
+                        f"({', '.join(config.allowed_commands)})."
+                    ),
                 )
 
             try:
@@ -69,18 +113,31 @@ class ShellCapabilityProvider(CapabilityProvider):
                     timeout=config.timeout_seconds,
                     shell=False,
                 )
-                output = (result.stdout or "") + (result.stderr or "")
             except subprocess.TimeoutExpired:
-                return f"Command timed out after {config.timeout_seconds}s."
-            except OSError as exc:
-                return f"Command failed: {exc}"
-
-            if len(output) > config.max_output_chars:
-                output = (
-                    output[: config.max_output_chars]
-                    + f"\n…(truncated, {len(output)} chars total)"
+                return _result(
+                    success=False,
+                    command=command,
+                    error=f"Command timed out after {config.timeout_seconds}s.",
                 )
-            return output or "(command succeeded, no output)"
+            except OSError as exc:
+                return _result(
+                    success=False,
+                    command=command,
+                    error=f"Command failed: {exc}",
+                )
+
+            return _result(
+                success=result.returncode == 0,
+                command=command,
+                exit_code=result.returncode,
+                stdout=result.stdout or "",
+                stderr=result.stderr or "",
+                error=(
+                    None
+                    if result.returncode == 0
+                    else f"Command exited with status {result.returncode}."
+                ),
+            )
 
         return [
             Capability(

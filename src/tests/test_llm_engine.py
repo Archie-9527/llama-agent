@@ -322,6 +322,22 @@ class TestTimeout:
 class TestToolCallFormat:
     """Acceptance: bind_tools → AIMessage.tool_calls is structured correctly."""
 
+    def test_bind_tools_defaults_to_auto_tool_choice(self):
+        """Ordinary create_agent binding must enable llama.cpp auto tools."""
+        from langchain_core.tools import tool
+
+        @tool
+        def echo(value: str) -> str:
+            """Echo a value."""
+            return value
+
+        # Avoid loading a GGUF for this binding-only contract test.
+        model = ChatLlamaCpp.model_construct(model_path="unused.gguf")
+        bound = model.bind_tools([echo])
+
+        assert bound.kwargs["tool_choice"] == "auto"
+        assert bound.kwargs["tools"][0]["function"]["name"] == "echo"
+
     @_real_model_pytest_mark
     def test_bind_tools_populates_tool_calls(self):
         """After bind_tools, the response AIMessage.tool_calls is structured."""
@@ -340,14 +356,14 @@ class TestToolCallFormat:
         result = bound.invoke([HumanMessage(content="What is the weather in Paris?")])
 
         assert isinstance(result, AIMessage)
-        if result.tool_calls:
-            tc = result.tool_calls[0]
-            assert "name" in tc
-            assert "args" in tc
-            assert "id" in tc
-            assert isinstance(tc["name"], str)
-            assert isinstance(tc["args"], dict)
-            assert isinstance(tc["id"], str)
+        assert result.tool_calls, "tool-triggering prompt produced no structured tool_calls"
+        tc = result.tool_calls[0]
+        assert "name" in tc
+        assert "args" in tc
+        assert "id" in tc
+        assert isinstance(tc["name"], str)
+        assert isinstance(tc["args"], dict)
+        assert isinstance(tc["id"], str)
 
 
 # ============================================================================

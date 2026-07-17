@@ -44,8 +44,10 @@ from agent_core.graph.state import AgentState
 from agent_core.graph.planner import planner_node
 from agent_core.graph.executor import (
     _build_react_input,
+    _ensure_tool_summary,
     _extract_execution_result,
     _normalize_output_messages,
+    _validate_required_tool_execution,
     executor_node,
 )
 from agent_core.graph.reflector import reflector_node
@@ -57,6 +59,7 @@ from agent_core.graph.build_graph import (
 from agent_core.graph.react_agent_factory import (
     USE_OFFICIAL_CREATE_AGENT,
     _build_via_self_made_stategraph,
+    _build_via_create_agent,
     _ReActState,
     _agent_node,
     _tool_node,
@@ -266,6 +269,69 @@ class TestExecutorStateBridging:
         assert records[2]["tool_used"] is None
         assert records[2]["result"] == "All tools completed."
 
+    def test_textual_pseudo_tool_call_is_rejected(self):
+        @register(
+            name="execute_shell_command",
+            description="Run a command",
+            input_schema={"type": "object", "properties": {}},
+        )
+        def execute_shell_command():
+            return "unused"
+
+        records = [{
+            "step": "inspect files",
+            "result": 'execute_shell_command(command="find src -type f")',
+            "tool_used": None,
+        }]
+
+        with pytest.raises(ExecutionError, match="pseudo tool call"):
+            _validate_required_tool_execution("inspect files", records)
+
+    def test_step_named_tool_requires_matching_tool_message(self):
+        @register(
+            name="execute_shell_command",
+            description="Run a command",
+            input_schema={"type": "object", "properties": {}},
+        )
+        def execute_shell_command():
+            return "unused"
+
+        records = [{"step": "s", "result": "I will do it", "tool_used": None}]
+        with pytest.raises(ExecutionError, match="explicitly requires"):
+            _validate_required_tool_execution(
+                "Use execute_shell_command to inspect src", records
+            )
+
+    def test_protocol_marker_is_replaced_by_recovery_summary(self):
+        records = [
+            {
+                "step": "count",
+                "result": '{"success": true, "stdout": "611\\n"}',
+                "tool_used": "count_lines",
+            },
+            {
+                "step": "count",
+                "result": "functions.count_lines:",
+                "tool_used": None,
+            },
+        ]
+        mock_engine = MagicMock()
+        mock_engine.invoke.return_value = AIMessage(
+            content="llm_engine.py 共有 611 行代码。"
+        )
+
+        with patch("agent_core.graph.executor.get_engine", return_value=mock_engine):
+            result = _ensure_tool_summary(
+                [HumanMessage(content="count lines")],
+                "count",
+                records,
+            )
+
+        assert len(result) == 2
+        assert result[-1]["result"] == "llm_engine.py 共有 611 行代码。"
+        assert all(r["result"] != "functions.count_lines:" for r in result)
+        mock_engine.invoke.assert_called_once()
+
     def test_missing_tool_message_raises_execution_error(self):
         """A7: Missing ToolMessage → ExecutionError with tool_call_id."""
         messages = [
@@ -346,7 +412,10 @@ class TestExecutorNode:
 
         mock_agent = MagicMock()
         mock_agent.invoke.return_value = {
-            "messages": [AIMessage(content="Done.")]
+            "messages": [
+                SystemMessage(content="test"),
+                AIMessage(content="Done."),
+            ]
         }
 
         mock_config = {"configurable": {"thread_id": "test-thread"}}
@@ -475,6 +544,20 @@ class TestReflector:
             result = reflector_node(base_state)
 
         assert result["current_iteration"] == 4
+
+    def test_continue_at_iteration_limit_becomes_failed(self, base_state):
+        base_state["current_iteration"] = 1
+        base_state["max_iterations"] = 2
+
+        mock_engine = MagicMock()
+        mock_engine.invoke.return_value = AIMessage(content="continue")
+
+        with patch("agent_core.graph.reflector.get_engine", return_value=mock_engine), \
+             patch("agent_core.graph.reflector.assemble_reflection_prompt", return_value=[SystemMessage(content="test")]):
+            result = reflector_node(base_state)
+
+        assert result["status"] == "failed"
+        assert "iteration limit" in result["reflection_notes"][-1]
 
 
 # ── Acceptance A10–A11: Routing logic ────────────────────────────────────────
@@ -726,6 +809,131 @@ class TestSingleSourceOfTruth:
         tool = to_langchain_tool(cap)
         assert tool.name == "no_arg_tool"
         assert tool.description == "A tool with no arguments"
+
+    def test_langchain_tool_invokes_original_handler_once(self):
+        calls: list[str] = []
+        cap = Capability(
+            name="record_value",
+            description="Record one value",
+            handler=lambda value: calls.append(value) or f"recorded:{value}",
+            input_schema={
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+            },
+        )
+
+        tool = to_langchain_tool(cap)
+        result = tool.invoke({"value": "once"})
+
+        assert result == "recorded:once"
+        assert calls == ["once"]
+
+    def test_existing_shell_tool_node_executes_real_handler(self):
+        """A structured call must reach the existing shell provider."""
+        from agent_core.capabilities.providers.shell_provider import (
+            ShellCapabilityProvider,
+        )
+
+        cap = ShellCapabilityProvider().build({"allowed_commands": ["pwd"]})[0]
+        register(
+            name=cap.name,
+            description=cap.description,
+            input_schema=cap.input_schema,
+        )(cap.handler)
+
+        state = _ReActState(messages=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    ToolCall(
+                        name="execute_shell_command",
+                        args={"command": "pwd"},
+                        id="call_pwd",
+                    )
+                ],
+            )
+        ])
+        output = _tool_node(state)
+
+        assert len(output["messages"]) == 1
+        tool_message = output["messages"][0]
+        assert isinstance(tool_message, ToolMessage)
+        payload = json.loads(tool_message.content)
+        assert payload["success"] is True
+        assert payload["exit_code"] == 0
+        assert "llama-agent" in payload["stdout"]
+
+    def test_official_agent_executes_tool_then_summarizes_without_tools(self):
+        """Full loop: structured call → real handler → tool-free final answer."""
+        from agent_core.capabilities.providers.shell_provider import (
+            ShellCapabilityProvider,
+        )
+        from agent_core.llm_engine import ChatLlamaCpp
+
+        cap = ShellCapabilityProvider().build({"allowed_commands": ["pwd"]})[0]
+        register(
+            name=cap.name,
+            description=cap.description,
+            input_schema=cap.input_schema,
+        )(cap.handler)
+
+        fake_client = MagicMock()
+        fake_client.create_chat_completion.side_effect = [
+            {
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{
+                            "id": "call_pwd",
+                            "type": "function",
+                            "function": {
+                                "name": "execute_shell_command",
+                                "arguments": '{"command": "pwd"}',
+                            },
+                        }],
+                    }
+                }]
+            },
+            {
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": "当前目录是 llama-agent 项目目录。",
+                    }
+                }]
+            },
+        ]
+        model = ChatLlamaCpp.model_construct(model_path="unused.gguf")
+        model._client = fake_client
+
+        with patch(
+            "agent_core.graph.react_agent_factory.get_engine",
+            return_value=model,
+        ):
+            agent = _build_via_create_agent()
+            output = agent.invoke(
+                {"messages": [HumanMessage(content="请执行 pwd 并回答当前目录")]},
+                config={"recursion_limit": 8},
+            )
+
+        assert fake_client.create_chat_completion.call_count == 2
+        first_call = fake_client.create_chat_completion.call_args_list[0].kwargs
+        second_call = fake_client.create_chat_completion.call_args_list[1].kwargs
+        assert first_call["tools"]
+        assert first_call["tool_choice"] == "auto"
+        assert second_call["tools"] is None
+
+        tool_messages = [
+            message for message in output["messages"]
+            if isinstance(message, ToolMessage)
+        ]
+        assert len(tool_messages) == 1
+        payload = json.loads(tool_messages[0].content)
+        assert payload["success"] is True
+        assert isinstance(output["messages"][-1], AIMessage)
+        assert output["messages"][-1].content == "当前目录是 llama-agent 项目目录。"
 
 
 # ── Acceptance A20: Architecture isolation ───────────────────────────────────

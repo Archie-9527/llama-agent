@@ -9,6 +9,7 @@ Covers:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
@@ -244,21 +245,21 @@ class TestShellProvider:
     def test_handler_allowed_cmd(self):
         provider = ShellCapabilityProvider()
         caps = provider.build({"allowed_commands": ["echo"]})
-        result = caps[0].handler(command="echo hello")
-        assert "hello" in result
+        result = json.loads(caps[0].handler(command="echo hello"))
+        assert result["success"] is True
+        assert result["exit_code"] == 0
+        assert "hello" in result["stdout"]
 
     def test_handler_blocked_cmd(self):
         provider = ShellCapabilityProvider()
         caps = provider.build({"allowed_commands": ["echo"]})
-        result = caps[0].handler(command="rm -rf /")
-        assert "not in the allowlist" in result.lower()
+        result = json.loads(caps[0].handler(command="rm -rf /"))
+        assert result["success"] is False
+        assert "not in the allowlist" in result["error"].lower()
 
     def test_invalid_config_raises(self):
         provider = SkillsCapabilityProvider()
-        # None bypasses the dataclass constructor check and reaches .exists()
-        # which raises AttributeError.  The proper way to trigger
-        # ToolProviderConfigError is to pass a wrong type that TypeError catches.
-        with pytest.raises((ToolProviderConfigError, AttributeError)):
+        with pytest.raises(ToolProviderConfigError):
             provider.build({"skills_dir": None})
 
 
@@ -279,6 +280,11 @@ class TestWebProvider:
 
 
 class TestSkillsProvider:
+    def test_string_skills_dir_from_toml_is_converted(self, tmp_path):
+        provider = SkillsCapabilityProvider()
+        caps = provider.build({"skills_dir": str(tmp_path)})
+        assert caps == []
+
     def test_missing_dir_returns_empty(self, caplog):
         provider = SkillsCapabilityProvider()
         with caplog.at_level(logging.WARNING):
@@ -440,7 +446,9 @@ class TestLoadToolsConfig:
         assert cfg.enabled_tools == ["execute_shell_command"]
         assert cfg.providers["shell"]["allowed_commands"] == ["ls", "cat"]
 
-    def test_defaults(self):
+    def test_defaults(self, monkeypatch, tmp_path):
+        # Avoid auto-detecting the repository's real agent_config.toml.
+        monkeypatch.chdir(tmp_path)
         cfg = load_tools_config()
         assert cfg.enabled_tools == []
         assert cfg.providers == {}

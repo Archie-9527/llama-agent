@@ -12,9 +12,10 @@ All bridging logic is encapsulated here so that ``planner_node`` and
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.messages.utils import convert_to_messages
 from langchain_core.runnables import RunnableConfig
 
@@ -136,6 +137,125 @@ def _extract_execution_result(
     return records
 
 
+def _validate_required_tool_execution(
+    current_step: str,
+    records: list[dict],
+) -> None:
+    """Reject textual tool imitations that were never actually executed.
+
+    A real tool execution always produces a ToolMessage and therefore a log
+    record with ``tool_used`` set.  Small local models sometimes understand
+    that a tool is needed but print ``tool_name(...)`` or a JSON snippet in a
+    plain AIMessage instead.  Treating that as success is unsafe and causes
+    fabricated tool results in later planning/reflection rounds.
+    """
+    from agent_core.capability_registry import list_capabilities
+
+    tool_names = [cap.name for cap in list_capabilities()]
+    used_tools = {
+        record["tool_used"] for record in records if record.get("tool_used")
+    }
+
+    required_by_step = [name for name in tool_names if name in current_step]
+    missing = [name for name in required_by_step if name not in used_tools]
+    if missing:
+        raise ExecutionError(
+            f"Step '{current_step}' explicitly requires tool(s) {missing}, "
+            "but the model returned no matching structured tool_calls."
+        )
+
+    plain_text = "\n".join(
+        str(record.get("result", ""))
+        for record in records
+        if record.get("tool_used") is None
+    )
+    pseudo_calls = [
+        name
+        for name in tool_names
+        if re.search(rf"\b{re.escape(name)}\s*\(", plain_text)
+        or re.search(
+            rf'["\'](?:tool|name)["\']\s*:\s*["\']{re.escape(name)}["\']',
+            plain_text,
+        )
+    ]
+    if pseudo_calls and not used_tools:
+        raise ExecutionError(
+            f"Step '{current_step}' returned textual pseudo tool call(s) "
+            f"{pseudo_calls} instead of structured tool_calls; no tool was executed."
+        )
+
+    if used_tools:
+        summaries = [
+            str(record.get("result", "")).strip()
+            for record in records
+            if record.get("tool_used") is None
+        ]
+        valid_summaries = [
+            summary for summary in summaries if _is_natural_language_summary(summary)
+        ]
+        if not valid_summaries:
+            raise ExecutionError(
+                f"Step '{current_step}' executed tool(s) {sorted(used_tools)} "
+                "but produced no valid natural-language summary."
+            )
+
+
+def _is_natural_language_summary(content: str) -> bool:
+    """Return False for empty or leaked llama.cpp function protocol markers."""
+    stripped = content.strip()
+    if not stripped:
+        return False
+    return re.fullmatch(r"functions\.[A-Za-z_][A-Za-z0-9_]*\s*:\s*", stripped) is None
+
+
+def _ensure_tool_summary(
+    messages: list[BaseMessage],
+    current_step: str,
+    records: list[dict],
+) -> list[dict]:
+    """Retry one tool-free model call when the inner agent omitted its summary."""
+    has_tool_result = any(record.get("tool_used") for record in records)
+    if has_tool_result:
+        # Protocol-only text is an internal formatting leak, not a user-facing
+        # conclusion.  Drop it before deciding whether recovery is needed.
+        records = [
+            record
+            for record in records
+            if record.get("tool_used") is not None
+            or _is_natural_language_summary(str(record.get("result", "")))
+        ]
+    has_valid_summary = any(
+        record.get("tool_used") is None
+        and _is_natural_language_summary(str(record.get("result", "")))
+        for record in records
+    )
+    if not has_tool_result or has_valid_summary:
+        return records
+
+    engine = get_engine()
+    response = engine.invoke(
+        [
+            *messages,
+            HumanMessage(
+                content=(
+                    f"当前步骤是：{current_step}\n"
+                    "请只根据以上真实 ToolMessage 给出自然语言最终答案。"
+                    "不要再次调用工具，不要输出 functions.<name>: 或调用格式。"
+                )
+            ),
+        ]
+    )
+    if response.content:
+        records.append(
+            {
+                "step": current_step,
+                "result": response.content,
+                "tool_used": None,
+            }
+        )
+    return records
+
+
 # ---------------------------------------------------------------------------
 # [STABLE] executor_node
 # ---------------------------------------------------------------------------
@@ -212,6 +332,13 @@ def executor_node(state: "AgentState", config: RunnableConfig) -> "AgentState":
     normalised = _normalize_output_messages(raw_messages)
     new_messages = normalised[input_message_count:]
     new_records = _extract_execution_result(new_messages, current_step)
+    new_records = _ensure_tool_summary(normalised, current_step, new_records)
+
+    if not new_records:
+        raise ExecutionError(
+            f"Step '{current_step}' produced no tool result or final response."
+        )
+    _validate_required_tool_execution(current_step, new_records)
 
     state["execution_log"].extend(new_records)
     state["current_step_index"] += 1
