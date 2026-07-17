@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from agent_core.llm_engine import EngineConfig
+from agent_core.telemetry.models import TelemetryConfig
 
 try:
     import tomllib
@@ -45,6 +46,7 @@ DEFAULT_CONFIG_SEARCH_PATHS: list[Path] = [
     Path("agent_config.toml"),
     Path.home() / ".config" / "llama-agent" / "config.toml",
 ]
+_LOGGED_CONFIG_PATHS: set[Path] = set()
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +65,10 @@ class AppConfig:
     db_path: Path = Path("data/checkpoints.sqlite")
     last_thread_file: Path = Path("data/last_thread_id.txt")
     log_level: str = "INFO"
+    conversation_db_path: Path = Path("data/conversations.sqlite")
+    last_conversation_file: Path = Path("data/last_conversation_id.txt")
+    conversation_history_turns: int = 8
+    conversation_history_token_budget: int = 4096
 
     def to_run_config(self):
         """Convert to ``session.RunConfig``, keeping the two data structures
@@ -76,6 +82,16 @@ class AppConfig:
         )
 
 
+@dataclass(frozen=True)
+class MemoryConfig:
+    """Independent optimization switches required for later ablation rounds."""
+
+    artifact_virtualization: bool = False
+    lifecycle_context: bool = False
+    kv_lifecycle: bool = False
+    branch_management: bool = False
+
+
 # ---------------------------------------------------------------------------
 # Per-domain type-caster tables
 # ---------------------------------------------------------------------------
@@ -86,6 +102,30 @@ _APP_FIELD_CASTERS: dict[str, Callable] = {
     "db_path": Path,
     "last_thread_file": Path,
     "log_level": str,
+    "conversation_db_path": Path,
+    "last_conversation_file": Path,
+    "conversation_history_turns": int,
+    "conversation_history_token_budget": int,
+}
+
+_TELEMETRY_FIELD_CASTERS: dict[str, Callable] = {
+    "enabled": lambda v: str(v).strip().lower() in ("1", "true", "yes"),
+    "output_dir": Path,
+    "sample_interval_ms": int,
+    "collect_process": lambda v: str(v).strip().lower() in ("1", "true", "yes"),
+    "collect_kv": lambda v: str(v).strip().lower() in ("1", "true", "yes"),
+    "collect_accelerator": lambda v: str(v).strip().lower() in ("1", "true", "yes"),
+    "collect_state_size": lambda v: str(v).strip().lower() in ("1", "true", "yes"),
+}
+
+_MEMORY_FIELD_CASTERS: dict[str, Callable] = {
+    name: (lambda v: str(v).strip().lower() in ("1", "true", "yes"))
+    for name in (
+        "artifact_virtualization",
+        "lifecycle_context",
+        "kv_lifecycle",
+        "branch_management",
+    )
 }
 
 _ENGINE_FIELD_CASTERS: dict[str, Callable] = {
@@ -102,6 +142,7 @@ _ENGINE_FIELD_CASTERS: dict[str, Callable] = {
     "max_tokens": int,
     "verbose": lambda v: str(v).strip().lower() in ("1", "true", "yes"),
     "request_timeout": float,
+    "disable_thinking": lambda v: str(v).strip().lower() in ("1", "true", "yes"),
     # ``stop`` is intentionally absent — it is a list and cannot be
     # expressed as a single env-var / CLI value.  Only the TOML file
     # (array syntax) can set it.
@@ -137,7 +178,10 @@ def _resolve_config_file(config_file: Optional[Path]) -> dict[str, Any]:
 
     for candidate in DEFAULT_CONFIG_SEARCH_PATHS:
         if candidate.exists():
-            logger.info("Loaded config file: %s", candidate)
+            resolved = candidate.resolve()
+            if resolved not in _LOGGED_CONFIG_PATHS:
+                logger.info("Loaded config file: %s", candidate)
+                _LOGGED_CONFIG_PATHS.add(resolved)
             return _load_toml_file(candidate)
     return {}
 
@@ -275,3 +319,46 @@ def load_tools_config(config_file: Optional[Path] = None) -> "ToolsConfig":
         enabled_tools=tools_data.get("enabled_tools", []),
         providers=tools_data.get("providers", {}),
     )
+
+
+def load_telemetry_config(
+    config_file: Optional[Path] = None,
+    cli_overrides: Optional[dict[str, Any]] = None,
+) -> TelemetryConfig:
+    """Load the optional ``[telemetry]`` section.
+
+    Environment names use ``AGENT_TELEMETRY_*`` to avoid colliding with
+    application fields, e.g. ``AGENT_TELEMETRY_ENABLED=true``.
+    """
+    file_data = _resolve_config_file(config_file)
+    merged = _cast_layer(
+        file_data.get("telemetry", {}), _TELEMETRY_FIELD_CASTERS
+    )
+    merged.update(
+        _cast_layer(
+            _load_env_layer("AGENT_TELEMETRY_", _TELEMETRY_FIELD_CASTERS),
+            _TELEMETRY_FIELD_CASTERS,
+        )
+    )
+    if cli_overrides:
+        merged.update({k: v for k, v in cli_overrides.items() if v is not None})
+    config = replace(TelemetryConfig(), **merged)
+    config.validate()
+    return config
+
+
+def load_memory_config(
+    config_file: Optional[Path] = None,
+    cli_overrides: Optional[dict[str, Any]] = None,
+) -> MemoryConfig:
+    file_data = _resolve_config_file(config_file)
+    merged = _cast_layer(file_data.get("memory", {}), _MEMORY_FIELD_CASTERS)
+    merged.update(
+        _cast_layer(
+            _load_env_layer("AGENT_MEMORY_", _MEMORY_FIELD_CASTERS),
+            _MEMORY_FIELD_CASTERS,
+        )
+    )
+    if cli_overrides:
+        merged.update({k: v for k, v in cli_overrides.items() if v is not None})
+    return replace(MemoryConfig(), **merged)

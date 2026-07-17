@@ -413,6 +413,24 @@ def assemble_reflection_prompt(
     return _apply_budget(raw, budget, engine)
 
 
+def assemble_finalization_prompt(
+    state: dict,
+    engine: TokenCounter,
+    reserved_for_generation: int = 512,
+) -> list[BaseMessage]:
+    """Build a tool-free prompt that synthesizes the whole task result."""
+    sys_msg = _render_system_prompt(
+        "finalization_system.jinja2",
+        task_goal=state.get("task_goal", ""),
+        plan_steps=state.get("plan_steps", []),
+        execution_log=state.get("execution_log", []),
+    )
+    raw: list[BaseMessage] = [sys_msg]
+    _validate_message_sequence(raw)
+    budget = _context_window(state, engine) - reserved_for_generation
+    return _apply_budget(raw, budget, engine)
+
+
 # ---------------------------------------------------------------------------
 # [INTERNAL] Budget helper
 # ---------------------------------------------------------------------------

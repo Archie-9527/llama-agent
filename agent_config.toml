@@ -18,6 +18,12 @@ last_thread_file = "data/last_thread_id.txt"
 # 日志级别：DEBUG / INFO / WARNING / ERROR
 log_level = "INFO"
 
+# 外部多轮会话存储和原文历史预算（Baseline 不做摘要）
+conversation_db_path = "data/conversations.sqlite"
+last_conversation_file = "data/last_conversation_id.txt"
+conversation_history_turns = 8
+conversation_history_token_budget = 4096
+
 # ---------------------------------------------------------------------------
 # 推理内核配置（映射到 ChatLlamaCpp / llama-cpp-python 构造参数）
 # ---------------------------------------------------------------------------
@@ -61,12 +67,37 @@ verbose = false
 # 单次推理超时时间（秒）
 request_timeout = 60.0
 
+# Qwen3/Qwen3.5 会默认输出思考过程；Agent 节点只需要最终结构或答案。
+disable_thinking = true
+
 [tools]
 enabled_tools = ["execute_shell_command", "fetch_url", "web_search", "count_lines"]
 
 [tools.providers.shell]
+# R0 的大型工具输出工作负载需要保留原始输出；后续 R1 将由 ArtifactStore
+# 取代直接内联。安全性仍由命令白名单、shell=False 和 timeout 保证。
+max_output_chars = 300000
 
 [tools.providers.web]
 
 [tools.providers.skills]
 skills_dir = "src/agent_core/capabilities/skills"
+
+# ---------------------------------------------------------------------------
+# Benchmark/运行时遥测。普通 run 默认关闭，benchmark worker 会强制开启。
+# ---------------------------------------------------------------------------
+[telemetry]
+enabled = false
+output_dir = "benchmark/results/runtime"
+sample_interval_ms = 200
+collect_process = true
+collect_kv = true
+collect_accelerator = true
+# 状态大小查询可能较慢，R0 默认关闭，专项实验时开启。
+collect_state_size = false
+
+[memory]
+artifact_virtualization = false
+lifecycle_context = false
+kv_lifecycle = false
+branch_management = false

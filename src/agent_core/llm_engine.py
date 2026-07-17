@@ -6,8 +6,10 @@ LLM 接口引擎层
 from __future__ import annotations
 
 import json
+import re
 import threading
 import uuid
+from time import monotonic_ns
 from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Union
 
 from langchain_core.callbacks import CallbackManagerForLLMRun
@@ -131,7 +133,9 @@ def _convert_llama_response_to_aimessage(
     """
     choice = response["choices"][0]
     msg_data = choice["message"]
-    content = msg_data.get("content") or ""
+    raw_content = msg_data.get("content") or ""
+    content, embedded_reasoning = _strip_thinking_content(raw_content)
+    reasoning_content = msg_data.get("reasoning_content") or embedded_reasoning
 
     tool_calls_data = msg_data.get("tool_calls") or []
     tool_calls: List[ToolCall] = []
@@ -164,7 +168,64 @@ def _convert_llama_response_to_aimessage(
             )
         ]
 
-    return AIMessage(content=content, tool_calls=tool_calls)
+    usage = response.get("usage") or {}
+    finish_reason = choice.get("finish_reason")
+    return AIMessage(
+        content=content,
+        tool_calls=tool_calls,
+        response_metadata={
+            "finish_reason": finish_reason,
+            "usage": dict(usage),
+            "model": response.get("model"),
+            "reasoning_content": reasoning_content,
+        },
+        usage_metadata=(
+            {
+                "input_tokens": int(usage.get("prompt_tokens", 0)),
+                "output_tokens": int(usage.get("completion_tokens", 0)),
+                "total_tokens": int(usage.get("total_tokens", 0)),
+            }
+            if usage
+            else None
+        ),
+    )
+
+
+def _strip_thinking_content(content: str) -> tuple[str, str]:
+    """Separate Qwen-style ``<think>`` blocks from user-visible content.
+
+    An unmatched opening tag means generation ended while still reasoning.
+    That unfinished suffix is reasoning, not a final answer.
+    """
+    if not content:
+        return "", ""
+
+    complete = re.compile(r"<think>(.*?)</think>", re.IGNORECASE | re.DOTALL)
+    reasoning_parts = [match.group(1).strip() for match in complete.finditer(content)]
+    visible = complete.sub("", content)
+
+    opening = re.search(r"<think>", visible, re.IGNORECASE)
+    if opening:
+        reasoning_parts.append(visible[opening.end() :].strip())
+        visible = visible[: opening.start()]
+
+    visible = re.sub(r"</?think>", "", visible, flags=re.IGNORECASE).strip()
+    reasoning = "\n\n".join(part for part in reasoning_parts if part)
+    return visible, reasoning
+
+
+def _append_no_think_marker(
+    messages: List[llama_cpp.llama_types.ChatCompletionRequestMessage],
+) -> List[llama_cpp.llama_types.ChatCompletionRequestMessage]:
+    """Append Qwen's soft switch without mutating LangChain messages."""
+    if not messages:
+        return messages
+    copied = [dict(message) for message in messages]
+    last = copied[-1]
+    content = str(last.get("content") or "")
+    if "/no_think" not in content:
+        last["content"] = f"{content}\n/no_think".strip()
+    return copied  # type: ignore[return-value]
 
 
 def _convert_langchain_tools_to_llama(
@@ -200,6 +261,42 @@ def compile_json_schema_to_gbnf(schema: dict) -> str:
     return json_schema_to_gbnf(json.dumps(schema))
 
 
+def _read_llama_perf(client: Any) -> dict[str, int | float | None]:
+    """Read cumulative counters reset immediately before the current call."""
+    if not isinstance(client, llama_cpp.Llama):
+        return {
+            "prompt_eval_ms": None,
+            "decode_eval_ms": None,
+            "prompt_eval_tokens": None,
+            "decode_eval_tokens": None,
+        }
+    try:
+        data = llama_cpp.llama_cpp.llama_perf_context(client._ctx.ctx)
+        return {
+            "prompt_eval_ms": float(data.t_p_eval_ms),
+            "decode_eval_ms": float(data.t_eval_ms),
+            "prompt_eval_tokens": int(data.n_p_eval),
+            "decode_eval_tokens": int(data.n_eval),
+        }
+    except (AttributeError, TypeError, ValueError):
+        return {
+            "prompt_eval_ms": None,
+            "decode_eval_ms": None,
+            "prompt_eval_tokens": None,
+            "decode_eval_tokens": None,
+        }
+
+
+def _reset_llama_perf(client: Any) -> None:
+    """Reset native counters only for a real ``llama_cpp.Llama`` instance."""
+    if not isinstance(client, llama_cpp.Llama):
+        return
+    try:
+        llama_cpp.llama_cpp.llama_perf_context_reset(client._ctx.ctx)
+    except (AttributeError, TypeError, ValueError):
+        pass
+
+
 # ---------------------------------------------------------------------------
 # [STABLE] ChatLlamaCpp — the core inference model
 # ---------------------------------------------------------------------------
@@ -231,6 +328,10 @@ class ChatLlamaCpp(BaseChatModel):
     verbose: bool = Field(default=False, description="Enable verbose llama.cpp output")
     request_timeout: float = Field(
         default=60.0, description="Max seconds for a single inference call"
+    )
+    disable_thinking: bool = Field(
+        default=False,
+        description="Append Qwen /no_think and hide reasoning blocks",
     )
 
     # ---- Private internal state (excluded from pydantic serialisation) ----
@@ -368,6 +469,8 @@ class ChatLlamaCpp(BaseChatModel):
         assert self._client is not None
 
         llama_messages = _convert_messages_to_llama_format(messages)
+        if self.disable_thinking:
+            llama_messages = _append_no_think_marker(llama_messages)
 
         # Tools — may come from bind_tools() or be passed at call-time
         langchain_tools = kwargs.get("tools") or []
@@ -391,8 +494,16 @@ class ChatLlamaCpp(BaseChatModel):
         grammar = kwargs.get("grammar", None)
 
         # ---- Critical section: llama_cpp.Llama is not thread-safe ----
+        from agent_core.telemetry import get_telemetry
+
+        telemetry = get_telemetry()
+        call_started_ns = monotonic_ns()
+        lock_wait_started_ns = call_started_ns
         try:
             with self._lock:
+                lock_acquired_ns = monotonic_ns()
+                telemetry.record_kv(self._client, "inference_before")
+                _reset_llama_perf(self._client)
                 response = self._client.create_chat_completion(
                     messages=llama_messages,  # type: ignore[arg-type]
                     tools=llama_tools,  # type: ignore[arg-type]
@@ -406,6 +517,9 @@ class ChatLlamaCpp(BaseChatModel):
                     stop=combined_stop if combined_stop else None,
                     grammar=grammar,
                 )
+                inference_finished_ns = monotonic_ns()
+                perf = _read_llama_perf(self._client)
+                telemetry.record_kv(self._client, "inference_after")
         except AgentEngineError:
             raise  # already our type — don't double-wrap
         except Exception as exc:
@@ -414,6 +528,26 @@ class ChatLlamaCpp(BaseChatModel):
             ) from exc
 
         ai_message = _convert_llama_response_to_aimessage(response)
+        usage = response.get("usage") or {}
+        telemetry.record_event(
+            "inference_events.jsonl",
+            "inference_completed",
+            input_tokens=int(usage.get("prompt_tokens", 0)),
+            output_tokens=int(usage.get("completion_tokens", 0)),
+            total_tokens=int(usage.get("total_tokens", 0)),
+            message_count=len(messages),
+            tool_schema_count=len(llama_tools or []),
+            tool_call_count=len(ai_message.tool_calls),
+            lock_wait_ms=(lock_acquired_ns - lock_wait_started_ns) / 1_000_000,
+            inference_ms=(inference_finished_ns - lock_acquired_ns) / 1_000_000,
+            total_ms=(inference_finished_ns - call_started_ns) / 1_000_000,
+            finish_reason=ai_message.response_metadata.get("finish_reason"),
+            prompt_eval_ms=perf.get("prompt_eval_ms"),
+            decode_eval_ms=perf.get("decode_eval_ms"),
+            prompt_eval_tokens=perf.get("prompt_eval_tokens"),
+            decode_eval_tokens=perf.get("decode_eval_tokens"),
+            ttft_ms=None,
+        )
         return ChatResult(generations=[ChatGeneration(message=ai_message)])
 
     # ------------------------------------------------------------------
@@ -431,6 +565,8 @@ class ChatLlamaCpp(BaseChatModel):
         assert self._client is not None
 
         llama_messages = _convert_messages_to_llama_format(messages)
+        if self.disable_thinking:
+            llama_messages = _append_no_think_marker(llama_messages)
 
         langchain_tools = kwargs.get("tools") or []
         llama_tools = (
@@ -524,6 +660,7 @@ class EngineConfig:
     stop: Optional[List[str]] = None
     verbose: bool = False
     request_timeout: float = 60.0
+    disable_thinking: bool = False
 
     def validate(self) -> None:
         """Fail-fast check before constructing the expensive ``ChatLlamaCpp``.

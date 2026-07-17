@@ -88,6 +88,8 @@ packaging==26.2
     # via
     #   langchain-core
     #   langsmith
+psutil==7.2.2
+    # via llama-agent (pyproject.toml)
 pydantic==2.13.4
     # via
     #   llama-agent (pyproject.toml)

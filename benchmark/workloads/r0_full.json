@@ -1,0 +1,97 @@
+{
+  "name": "r0-full",
+  "seed": 42,
+  "warmup_runs": 1,
+  "measured_runs": 5,
+  "cases": [
+    {
+      "case_id": "w1-local-tool",
+      "category": "W1-local-tool",
+      "goal": "使用 count_lines 工具统计 src/agent_core/llm_engine.py 的代码行数，并明确说明文件名和结果。",
+      "expected_status": "done",
+      "expected_contains": ["llm_engine.py"],
+      "expected_tools": ["count_lines"]
+    },
+    {
+      "case_id": "w2-tool-output-4k",
+      "category": "W2-large-tool-output",
+      "goal": "使用 execute_shell_command 执行 cat {fixture_path}，然后说明结果中出现的标记 AGENTMEM_PAYLOAD。必须实际调用工具。",
+      "expected_status": "done",
+      "expected_contains": ["AGENTMEM_PAYLOAD"],
+      "expected_tools": ["execute_shell_command"],
+      "metadata": {
+        "fixture_size_bytes": 4096,
+        "fixture_marker": "AGENTMEM_PAYLOAD"
+      }
+    },
+    {
+      "case_id": "w2-tool-output-16k",
+      "category": "W2-large-tool-output",
+      "goal": "使用 execute_shell_command 执行 cat {fixture_path}，然后说明结果中出现的标记 AGENTMEM_PAYLOAD。必须实际调用工具。",
+      "expected_status": "done",
+      "expected_contains": ["AGENTMEM_PAYLOAD"],
+      "expected_tools": ["execute_shell_command"],
+      "metadata": {
+        "fixture_size_bytes": 16384,
+        "fixture_marker": "AGENTMEM_PAYLOAD"
+      }
+    },
+    {
+      "case_id": "w2-tool-output-64k",
+      "category": "W2-large-tool-output",
+      "goal": "使用 execute_shell_command 执行 cat {fixture_path}，然后说明结果中出现的标记 AGENTMEM_PAYLOAD。必须实际调用工具。",
+      "expected_status": "done",
+      "expected_contains": ["AGENTMEM_PAYLOAD"],
+      "expected_tools": ["execute_shell_command"],
+      "metadata": {
+        "fixture_size_bytes": 65536,
+        "fixture_marker": "AGENTMEM_PAYLOAD"
+      }
+    },
+    {
+      "case_id": "w2-tool-output-256k",
+      "category": "W2-large-tool-output",
+      "goal": "使用 execute_shell_command 执行 cat {fixture_path}，然后说明结果中出现的标记 AGENTMEM_PAYLOAD。必须实际调用工具。",
+      "expected_status": "done",
+      "expected_contains": ["AGENTMEM_PAYLOAD"],
+      "expected_tools": ["execute_shell_command"],
+      "metadata": {
+        "fixture_size_bytes": 262144,
+        "fixture_marker": "AGENTMEM_PAYLOAD"
+      }
+    },
+    {
+      "case_id": "w3-four-turn-reference",
+      "category": "W3-conversation",
+      "turns": [
+        "记住项目代号是 AgentMem，并直接告诉我你记住了什么。",
+        "记住基线轮次是 R0。",
+        "告诉我上一轮提到的基线轮次。",
+        "综合此前对话，项目代号和基线轮次分别是什么？"
+      ],
+      "expected_status": "done",
+      "expected_contains": ["AgentMem", "R0"]
+    },
+    {
+      "case_id": "w4-tool-failure",
+      "category": "W4-failure",
+      "goal": "尝试使用 execute_shell_command 执行不在白名单中的命令 uname -a，并如实说明工具是否成功，不要虚构结果。",
+      "expected_status": "done",
+      "expected_contains": ["uname"],
+      "expected_tools": ["execute_shell_command"]
+    },
+    {
+      "case_id": "w5-four-tasks",
+      "category": "W5-multi-task",
+      "tasks": [
+        "使用 count_lines 统计 src/agent_core/config.py 的行数。",
+        "使用 count_lines 统计 src/agent_core/session.py 的行数。",
+        "使用 count_lines 统计 src/agent_core/graph/executor.py 的行数。",
+        "使用 count_lines 统计 src/agent_core/llm_engine.py 的行数。"
+      ],
+      "concurrency": 4,
+      "expected_status": "done",
+      "expected_tools": ["count_lines"]
+    }
+  ]
+}

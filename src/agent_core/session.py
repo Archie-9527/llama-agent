@@ -134,13 +134,17 @@ class TaskRunner:
             current_iteration=0,
             max_iterations=self.config.max_iterations,
             status="planning",
+            final_answer="",
+            error=None,
         )
 
     # ------------------------------------------------------------------
     # [STABLE] Public entry points
     # ------------------------------------------------------------------
 
-    def start_new_task(self, task_goal: str) -> tuple[str, AgentState]:
+    def start_new_task(
+        self, task_goal: str, *, thread_id: str | None = None
+    ) -> tuple[str, AgentState]:
         """Start a brand-new task.
 
         Args:
@@ -157,11 +161,24 @@ class TaskRunner:
         if not task_goal or not task_goal.strip():
             raise ValueError("task_goal must not be empty")
 
-        thread_id = str(uuid.uuid4())
+        thread_id = thread_id or str(uuid.uuid4())
         initial_state = self._build_initial_state(task_goal)
         logger.info("Starting new task  thread_id=%s  goal=%r", thread_id, task_goal)
 
-        result = self._invoke(initial_state, thread_id)
+        from agent_core.telemetry import get_telemetry, telemetry_task
+
+        telemetry = get_telemetry()
+        with telemetry_task(thread_id):
+            telemetry.record_event("lifecycle_events.jsonl", "task_started")
+            result = self._invoke(initial_state, thread_id)
+            telemetry.record_event(
+                "lifecycle_events.jsonl",
+                "task_finished",
+                status=result.get("status"),
+                final_answer_bytes=len(
+                    str(result.get("final_answer", "")).encode("utf-8")
+                ),
+            )
         self._remember_thread_id(thread_id)
         return thread_id, result
 
@@ -189,7 +206,10 @@ class TaskRunner:
             raise ValueError("thread_id must not be empty")
 
         logger.info("Resuming task  thread_id=%s", thread_id)
-        return self._invoke(None, thread_id)
+        from agent_core.telemetry import telemetry_task
+
+        with telemetry_task(thread_id):
+            return self._invoke(None, thread_id)
 
     # ------------------------------------------------------------------
     # Internal invoke — single choke-point for graph calls

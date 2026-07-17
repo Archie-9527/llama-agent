@@ -1,0 +1,26 @@
+{
+  "name": "r0-smoke",
+  "seed": 42,
+  "warmup_runs": 1,
+  "measured_runs": 5,
+  "cases": [
+    {
+      "case_id": "w1-count-llm-engine",
+      "category": "W1-local-tool",
+      "goal": "使用 count_lines 工具统计 src/agent_core/llm_engine.py 的代码行数，并明确回答结果。",
+      "expected_status": "done",
+      "expected_contains": ["llm_engine.py"],
+      "expected_tools": ["count_lines"]
+    },
+    {
+      "case_id": "w3-two-turn-reference",
+      "category": "W3-conversation",
+      "turns": [
+        "记住项目代号是 AgentMem，并直接告诉我你记住了什么。",
+        "上一轮我告诉你的项目代号是什么？"
+      ],
+      "expected_status": "done",
+      "expected_contains": ["AgentMem"]
+    }
+  ]
+}

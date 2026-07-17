@@ -12,9 +12,11 @@ dependencies = [
     "requests>=2.32,<3.0",
     "beautifulsoup4>=4.13,<5.0",
     "pyyaml>=6.0,<7.0",
+    "psutil==7.2.2",
 ]
 [project.optional-dependencies]
 dev = ["pytest", "ruff", "matplotlib"]
+gpu = ["nvidia-ml-py>=12.0"]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
