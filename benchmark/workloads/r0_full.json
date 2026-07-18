@@ -70,7 +70,13 @@
         "综合此前对话，项目代号和基线轮次分别是什么？"
       ],
       "expected_status": "done",
-      "expected_contains": ["AgentMem", "R0"]
+      "expected_contains": ["AgentMem", "R0"],
+      "forbidden_tools": [
+        "web_search",
+        "fetch_url",
+        "execute_shell_command",
+        "count_lines"
+      ]
     },
     {
       "case_id": "w4-tool-failure",

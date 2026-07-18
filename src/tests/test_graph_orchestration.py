@@ -47,6 +47,7 @@ from agent_core.graph.executor import (
     _ensure_tool_summary,
     _extract_execution_result,
     _normalize_output_messages,
+    _recover_empty_response,
     _validate_required_tool_execution,
     executor_node,
 )
@@ -331,6 +332,44 @@ class TestExecutorStateBridging:
         assert result[-1]["result"] == "llm_engine.py 共有 611 行代码。"
         assert all(r["result"] != "functions.count_lines:" for r in result)
         mock_engine.invoke.assert_called_once()
+
+    def test_empty_response_has_one_tool_free_recovery(self):
+        mock_engine = MagicMock()
+        mock_engine.invoke.return_value = AIMessage(
+            content="我记住的项目代号是 AgentMem。"
+        )
+        with patch("agent_core.graph.executor.get_engine", return_value=mock_engine):
+            records = _recover_empty_response(
+                [HumanMessage(content="记住项目代号是 AgentMem")],
+                "直接回答用户",
+            )
+        assert records == [
+            {
+                "step": "直接回答用户",
+                "result": "我记住的项目代号是 AgentMem。",
+                "tool_used": None,
+            }
+        ]
+        assert "不要调用工具" in mock_engine.invoke.call_args.args[0][-1].content
+
+    def test_functions_protocol_is_rejected_as_pseudo_call(self):
+        @register(
+            name="count_lines",
+            description="Count lines",
+            input_schema={"type": "object", "properties": {}},
+        )
+        def count_lines():
+            return "unused"
+
+        records = [
+            {
+                "step": "count",
+                "result": "functions.count_lines:",
+                "tool_used": None,
+            }
+        ]
+        with pytest.raises(ExecutionError, match="pseudo tool call"):
+            _validate_required_tool_execution("count", records)
 
     def test_missing_tool_message_raises_execution_error(self):
         """A7: Missing ToolMessage → ExecutionError with tool_call_id."""

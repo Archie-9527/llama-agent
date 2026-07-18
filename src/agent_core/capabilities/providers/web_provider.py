@@ -1,8 +1,9 @@
 """Web access capability provider — URL fetching and web search.
 
-Provides two capabilities:
+Provides up to two capabilities:
     * ``fetch_url`` — retrieve and extract visible text from a web page.
-    * ``web_search`` — query a configurable search API backend.
+    * ``web_search`` — query a configured search API backend; it is not
+      exposed to the model when no backend URL is configured.
 
 Both enforce configurable timeouts and content-size caps.  JS-rendered
 content is NOT supported (no headless browser).
@@ -100,7 +101,7 @@ class WebCapabilityProvider(CapabilityProvider):
                 )
             return "\n".join(lines) if lines else "No results found."
 
-        return [
+        capabilities = [
             Capability(
                 name="fetch_url",
                 description=(
@@ -118,20 +119,27 @@ class WebCapabilityProvider(CapabilityProvider):
                     "required": ["url"],
                 },
                 handler=_fetch_url,
-            ),
-            Capability(
-                name="web_search",
-                description=(
-                    "Search the web for the given query and return "
-                    "title + snippet + URL results."
-                ),
-                input_schema={
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "Search keywords"}
-                    },
-                    "required": ["query"],
-                },
-                handler=_web_search,
-            ),
+            )
         ]
+        if config.search_api_url:
+            capabilities.append(
+                Capability(
+                    name="web_search",
+                    description=(
+                        "Search the web for the given query and return "
+                        "title + snippet + URL results."
+                    ),
+                    input_schema={
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "Search keywords",
+                            }
+                        },
+                        "required": ["query"],
+                    },
+                    handler=_web_search,
+                )
+            )
+        return capabilities

@@ -529,6 +529,12 @@ class ChatLlamaCpp(BaseChatModel):
 
         ai_message = _convert_llama_response_to_aimessage(response)
         usage = response.get("usage") or {}
+        raw_message = (response.get("choices") or [{}])[0].get("message") or {}
+        raw_content = str(raw_message.get("content") or "")
+        visible_content = str(ai_message.content or "")
+        reasoning_content = str(
+            ai_message.response_metadata.get("reasoning_content") or ""
+        )
         telemetry.record_event(
             "inference_events.jsonl",
             "inference_completed",
@@ -538,6 +544,10 @@ class ChatLlamaCpp(BaseChatModel):
             message_count=len(messages),
             tool_schema_count=len(llama_tools or []),
             tool_call_count=len(ai_message.tool_calls),
+            raw_content_bytes=len(raw_content.encode("utf-8")),
+            visible_content_bytes=len(visible_content.encode("utf-8")),
+            reasoning_content_bytes=len(reasoning_content.encode("utf-8")),
+            visible_content_empty=not bool(visible_content.strip()),
             lock_wait_ms=(lock_acquired_ns - lock_wait_started_ns) / 1_000_000,
             inference_ms=(inference_finished_ns - lock_acquired_ns) / 1_000_000,
             total_ms=(inference_finished_ns - call_started_ns) / 1_000_000,

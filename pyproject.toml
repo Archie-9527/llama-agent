@@ -31,3 +31,8 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["agent_core*"]
+
+[tool.pytest.ini_options]
+markers = [
+    "real_model: opt-in integration test that loads a local GGUF model",
+]

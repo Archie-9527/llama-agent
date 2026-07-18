@@ -27,6 +27,53 @@ from agent_core.session import TaskRunner
 from agent_core.telemetry import initialize_telemetry
 
 
+def _turn_result_payload(turn, result: dict) -> dict:
+    """Return the minimal per-turn diagnostic persisted by a benchmark run."""
+    return {
+        "turn_index": turn.turn_index,
+        "turn_id": turn.turn_id,
+        "thread_id": turn.thread_id,
+        "user_input": turn.user_input,
+        "status": turn.status,
+        "final_answer": result.get("final_answer", ""),
+        "error": result.get("error") or turn.error,
+        "reflection_notes": result.get("reflection_notes", []),
+        "execution_log": result.get("execution_log", []),
+    }
+
+
+def _run_conversation_case(
+    manager: ConversationManager,
+    turns: tuple[str, ...],
+) -> tuple[dict, list[dict], int | None]:
+    """Run turns in order and stop after the first failed turn.
+
+    Continuing after a failure creates misleading follow-up errors because the
+    prior assistant answer was never produced.  Remaining turns are retained as
+    explicit skipped records so the report still shows the full case shape.
+    """
+    conversation_id, turn, result = manager.start(turns[0])
+    turn_results = [_turn_result_payload(turn, result)]
+    failed_turn_index = 0 if result.get("status") != "done" else None
+
+    for turn_index, turn_text in enumerate(turns[1:], start=1):
+        if failed_turn_index is not None:
+            turn_results.append(
+                {
+                    "turn_index": turn_index,
+                    "user_input": turn_text,
+                    "status": "skipped_due_to_previous_failure",
+                }
+            )
+            continue
+        turn, result = manager.continue_conversation(conversation_id, turn_text)
+        turn_results.append(_turn_result_payload(turn, result))
+        if result.get("status") != "done":
+            failed_turn_index = turn_index
+
+    return result, turn_results, failed_turn_index
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, required=True)
@@ -41,6 +88,8 @@ def main(argv: list[str] | None = None) -> int:
     started = monotonic_ns()
     result: dict
     conversation_store: ConversationStore | None = None
+    turn_results: list[dict] = []
+    failed_turn_index: int | None = None
     collector = None
     try:
         app = load_app_config(args.config)
@@ -103,11 +152,9 @@ def main(argv: list[str] | None = None) -> int:
                         history_token_budget=app.conversation_history_token_budget,
                     ),
                 )
-                conversation_id, _, result = manager.start(case.turns[0])
-                for turn_text in case.turns[1:]:
-                    _, result = manager.continue_conversation(
-                        conversation_id, turn_text
-                    )
+                result, turn_results, failed_turn_index = _run_conversation_case(
+                    manager, case.turns
+                )
             else:
                 _, result = runner.start_new_task(case.goal)
         duration_ms = (monotonic_ns() - started) / 1_000_000
@@ -119,6 +166,10 @@ def main(argv: list[str] | None = None) -> int:
             "duration_ms": duration_ms,
             "evaluation": evaluate(case, result),
             "execution_log": result.get("execution_log", []),
+            "error": result.get("error"),
+            "reflection_notes": result.get("reflection_notes", []),
+            "turn_results": turn_results,
+            "failed_turn_index": failed_turn_index,
         }
         args.result_file.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2, default=str),

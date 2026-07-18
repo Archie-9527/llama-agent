@@ -20,7 +20,13 @@
         "上一轮我告诉你的项目代号是什么？"
       ],
       "expected_status": "done",
-      "expected_contains": ["AgentMem"]
+      "expected_contains": ["AgentMem"],
+      "forbidden_tools": [
+        "web_search",
+        "fetch_url",
+        "execute_shell_command",
+        "count_lines"
+      ]
     }
   ]
 }

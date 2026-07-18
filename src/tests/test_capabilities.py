@@ -264,19 +264,16 @@ class TestShellProvider:
 
 
 class TestWebProvider:
-    def test_build_returns_two(self):
+    def test_unconfigured_search_is_not_exposed(self):
         provider = WebCapabilityProvider()
         caps = provider.build({})
         names = {c.name for c in caps}
-        assert "fetch_url" in names
-        assert "web_search" in names
+        assert names == {"fetch_url"}
 
-    def test_web_search_no_backend(self):
+    def test_configured_search_is_exposed(self):
         provider = WebCapabilityProvider()
-        caps = provider.build({})
-        search = next(c for c in caps if c.name == "web_search")
-        result = search.handler(query="test")
-        assert "not configured" in result.lower()
+        caps = provider.build({"search_api_url": "https://search.invalid/api"})
+        assert {c.name for c in caps} == {"fetch_url", "web_search"}
 
 
 class TestSkillsProvider:

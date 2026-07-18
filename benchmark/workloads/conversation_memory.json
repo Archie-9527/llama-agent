@@ -1,0 +1,25 @@
+{
+  "name": "conversation-memory",
+  "seed": 42,
+  "warmup_runs": 0,
+  "measured_runs": 1,
+  "cases": [
+    {
+      "case_id": "memory-three-turn-facts",
+      "category": "W3-conversation",
+      "turns": [
+        "记住项目代号是 AgentMem，校验码是 7319，并直接复述。",
+        "上一轮我告诉你的校验码是什么？",
+        "综合此前对话，项目代号和校验码分别是什么？"
+      ],
+      "expected_status": "done",
+      "expected_contains": ["AgentMem", "7319"],
+      "forbidden_tools": [
+        "web_search",
+        "fetch_url",
+        "execute_shell_command",
+        "count_lines"
+      ]
+    }
+  ]
+}

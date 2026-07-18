@@ -34,10 +34,12 @@ from agent_core.exceptions import (
 )
 from agent_core.llm_engine import (
     ChatLlamaCpp,
+    EngineConfig,
     _convert_llama_response_to_aimessage,
     _convert_messages_to_llama_format,
     compile_json_schema_to_gbnf,
     get_engine,
+    initialize_engine,
 )
 from langchain_core.messages import (
     AIMessage,
@@ -59,10 +61,17 @@ try:
 except ImportError:
     _mock = False
 
-_real_model_available = _gguf_exists and not _mock
+_real_model_available = (
+    _gguf_exists
+    and not _mock
+    and os.environ.get("RUN_REAL_MODEL_TESTS") == "1"
+)
 _real_model_pytest_mark = pytest.mark.skipif(
     not _real_model_available,
-    reason=f"Real GGUF model not found at {MODEL_PATH} (or llama_cpp is mocked)",
+    reason=(
+        "set RUN_REAL_MODEL_TESTS=1 and provide a real llama_cpp installation "
+        f"plus {MODEL_PATH}"
+    ),
 )
 
 
@@ -373,6 +382,7 @@ class TestToolCallFormat:
 class TestExceptionIsolation:
     """Acceptance: malformed input → AgentEngineError subclass, never raw llama_cpp error."""
 
+    @_real_model_pytest_mark
     def test_malformed_grammar_raises_agent_engine_error(self):
         """A garbage grammar string must not produce a raw llama_cpp exception."""
         model = ChatLlamaCpp(model_path=MODEL_PATH, n_ctx=256)
@@ -491,7 +501,7 @@ class TestGetEngine:
     @_real_model_pytest_mark
     def test_get_engine_returns_same_instance(self):
         """Repeated get_engine() calls return the identical object."""
-        e1 = get_engine({"model_path": MODEL_PATH, "n_ctx": 256})
+        e1 = initialize_engine(EngineConfig(model_path=MODEL_PATH, n_ctx=256))
         e2 = get_engine()
         assert e1 is e2
 

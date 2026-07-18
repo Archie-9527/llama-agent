@@ -57,10 +57,17 @@ try:
 except ImportError:
     _mock = False
 
-_real_model_available = _gguf_exists and not _mock
+_real_model_available = (
+    _gguf_exists
+    and not _mock
+    and os.environ.get("RUN_REAL_MODEL_TESTS") == "1"
+)
 _real_model_pytest_mark = pytest.mark.skipif(
     not _real_model_available,
-    reason=f"Real GGUF model not found at {MODEL_PATH} (or llama_cpp is mocked)",
+    reason=(
+        "set RUN_REAL_MODEL_TESTS=1 and provide a real llama_cpp installation "
+        f"plus {MODEL_PATH}"
+    ),
 )
 
 # ── Singleton isolation ─────────────────────────────────────────────────────

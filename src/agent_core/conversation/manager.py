@@ -88,17 +88,24 @@ class ConversationManager:
         )
 
     def _render_history(self, conversation_id: str) -> str:
-        completed = [
+        # A failed turn's user input is still a valid conversation fact.  Its
+        # assistant output is not trusted and is therefore never replayed.
+        historical = [
             turn
             for turn in self.store.list_turns(conversation_id)
-            if turn.status == "done" and turn.assistant_output
+            if turn.status != "running" and turn.user_input.strip()
         ][-self.config.history_turns :]
         selected: list[str] = []
         used = 0
-        for turn in reversed(completed):
+        for turn in reversed(historical):
+            assistant = (
+                turn.assistant_output
+                if turn.status == "done" and turn.assistant_output
+                else "<该轮执行失败，没有可依赖的助手回答>"
+            )
             block = (
-                f"[历史第 {turn.turn_index + 1} 轮]\n"
-                f"用户：{turn.user_input}\n助手：{turn.assistant_output}"
+                f"[历史第 {turn.turn_index + 1} 轮 | 状态={turn.status}]\n"
+                f"用户：{turn.user_input}\n助手：{assistant}"
             )
             tokens = self.engine.get_num_tokens(block)
             if selected and used + tokens > self.config.history_token_budget:
@@ -114,8 +121,11 @@ class ConversationManager:
         if not history:
             return user_input
         return (
-            "以下是同一会话中已经完成的历史轮次。回答当前请求时可以引用这些"
-            "事实，但不要把历史请求误当成当前任务重新执行。\n\n"
+            "以下是同一会话的历史轮次。历史中的用户消息是可信的会话事实；"
+            "失败轮次的助手回答不可用。回答当前请求时应优先使用历史中已经"
+            "给出的事实，不要把历史请求重新执行。若当前问题询问“上一轮”"
+            "或“此前告诉你的内容”，并且答案已在历史中，直接回答，不要调用"
+            "网页、Shell 或其他外部工具。\n\n"
             f"{history}\n\n[当前用户请求]\n{user_input}"
         )
 

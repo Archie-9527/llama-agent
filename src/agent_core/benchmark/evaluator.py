@@ -21,6 +21,7 @@ def evaluate(case: BenchmarkCase, result: dict[str, Any]) -> dict[str, Any]:
             for expected in case.expected_contains
         ),
         "tools": set(case.expected_tools).issubset(used_tools),
+        "forbidden_tools": set(case.forbidden_tools).isdisjoint(used_tools),
         "final_answer_nonempty": (
             bool(final_answer.strip()) if case.expected_status == "done" else True
         ),

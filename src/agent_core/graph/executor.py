@@ -173,6 +173,7 @@ def _validate_required_tool_execution(
         name
         for name in tool_names
         if re.search(rf"\b{re.escape(name)}\s*\(", plain_text)
+        or re.search(rf"\bfunctions\.{re.escape(name)}\s*:", plain_text)
         or re.search(
             rf'["\'](?:tool|name)["\']\s*:\s*["\']{re.escape(name)}["\']',
             plain_text,
@@ -206,6 +207,29 @@ def _is_natural_language_summary(content: str) -> bool:
     if not stripped:
         return False
     return re.fullmatch(r"functions\.[A-Za-z_][A-Za-z0-9_]*\s*:\s*", stripped) is None
+
+
+def _recover_empty_response(
+    messages: list[BaseMessage],
+    current_step: str,
+) -> list[dict]:
+    """Retry once without tools when the inner agent returned no visible output."""
+    response = get_engine().invoke(
+        [
+            *messages,
+            HumanMessage(
+                content=(
+                    f"当前步骤是：{current_step}\n"
+                    "刚才没有产生可见回答。请直接给出非空的自然语言最终回答。"
+                    "不要调用工具，不要输出 JSON、functions.<name>: 或任何工具协议。"
+                )
+            ),
+        ]
+    )
+    content = str(response.content or "").strip()
+    if not _is_natural_language_summary(content):
+        return []
+    return [{"step": current_step, "result": content, "tool_used": None}]
 
 
 def _ensure_tool_summary(
@@ -335,9 +359,15 @@ def executor_node(state: "AgentState", config: RunnableConfig) -> "AgentState":
     new_records = _ensure_tool_summary(normalised, current_step, new_records)
 
     if not new_records:
-        raise ExecutionError(
-            f"Step '{current_step}' produced no tool result or final response."
+        new_records = _recover_empty_response(
+            react_input["messages"],
+            current_step,
         )
+        if not new_records:
+            raise ExecutionError(
+                f"Step '{current_step}' produced no tool result or final response "
+                "after one tool-free recovery attempt."
+            )
     _validate_required_tool_execution(current_step, new_records)
 
     state["execution_log"].extend(new_records)

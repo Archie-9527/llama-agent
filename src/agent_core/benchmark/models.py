@@ -19,6 +19,7 @@ class BenchmarkCase:
     expected_status: str = "done"
     expected_contains: tuple[str, ...] = ()
     expected_tools: tuple[str, ...] = ()
+    forbidden_tools: tuple[str, ...] = ()
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -37,6 +38,9 @@ class BenchmarkCase:
             expected_tools=tuple(
                 str(item) for item in raw.get("expected_tools", [])
             ),
+            forbidden_tools=tuple(
+                str(item) for item in raw.get("forbidden_tools", [])
+            ),
             metadata=dict(raw.get("metadata", {})),
         )
 
@@ -51,6 +55,7 @@ class BenchmarkCase:
             "expected_status": self.expected_status,
             "expected_contains": list(self.expected_contains),
             "expected_tools": list(self.expected_tools),
+            "forbidden_tools": list(self.forbidden_tools),
             "metadata": self.metadata,
         }
 

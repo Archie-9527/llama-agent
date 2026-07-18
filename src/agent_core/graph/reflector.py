@@ -97,6 +97,19 @@ def reflector_node(state: "AgentState") -> "AgentState":
             "type": "IterationLimitExceeded",
             "message": f"max_iterations={max_iterations} reached",
         }
+    elif decision == "failed":
+        state["status"] = "failed"
+        state.setdefault(
+            "error",
+            {
+                "node": "reflector",
+                "type": "ReflectionRejected",
+                "message": (
+                    "Reflector rejected the execution result at "
+                    f"iteration {current_iteration}."
+                ),
+            },
+        )
     else:
         state["status"] = decision
 

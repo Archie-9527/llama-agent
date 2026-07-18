@@ -8,6 +8,8 @@ from unittest.mock import patch
 from agent_core.benchmark.aggregator import aggregate_run
 from agent_core.benchmark.evaluator import evaluate
 from agent_core.benchmark.models import BenchmarkCase, BenchmarkSuite
+from agent_core.benchmark.worker import _run_conversation_case
+from agent_core.conversation.models import Turn
 from agent_core.conversation.manager import ConversationConfig, ConversationManager
 from agent_core.conversation.store import ConversationStore
 from agent_core.telemetry.kv_monitor import sample_kv
@@ -69,6 +71,60 @@ def test_conversation_history_is_recent_and_budgeted(tmp_path: Path):
     store.close()
 
 
+def test_failed_turn_keeps_user_fact_but_not_assistant_output(tmp_path: Path):
+    store = ConversationStore(tmp_path / "conversations.sqlite")
+    store.create_conversation("c1")
+    store.create_running_turn(
+        turn_id="t1",
+        conversation_id="c1",
+        thread_id="thread1",
+        user_input="项目代号是 AgentMem",
+    )
+    store.finish_turn(
+        "t1",
+        status="failed",
+        assistant_output="错误答案是 OtherProject",
+        error="empty response",
+    )
+    engine = MagicMock()
+    engine.get_num_tokens.side_effect = lambda text: len(text)
+    manager = ConversationManager(MagicMock(), store, engine)
+    history = manager._render_history("c1")
+    assert "AgentMem" in history
+    assert "OtherProject" not in history
+    assert "执行失败" in history
+    store.close()
+
+
+def test_benchmark_conversation_stops_after_first_failed_turn():
+    manager = MagicMock()
+    failed_turn = Turn(
+        turn_id="t1",
+        conversation_id="c1",
+        thread_id="thread1",
+        turn_index=0,
+        user_input="记住 AgentMem",
+        assistant_output="",
+        status="failed",
+        error="empty response",
+        created_at="now",
+        updated_at="now",
+    )
+    failed_result = {"status": "failed", "error": "empty response"}
+    manager.start.return_value = ("c1", failed_turn, failed_result)
+
+    result, turns, failed_index = _run_conversation_case(
+        manager,
+        ("记住 AgentMem", "上一轮的代号是什么？"),
+    )
+
+    assert result is failed_result
+    assert failed_index == 0
+    assert turns[0]["error"] == "empty response"
+    assert turns[1]["status"] == "skipped_due_to_previous_failure"
+    manager.continue_conversation.assert_not_called()
+
+
 def test_kv_snapshot_falls_back_cleanly():
     class Client:
         n_tokens = 12
@@ -109,6 +165,7 @@ def test_benchmark_suite_and_evaluator(tmp_path: Path):
                         "goal": "count",
                         "expected_contains": ["42"],
                         "expected_tools": ["count_lines"],
+                        "forbidden_tools": ["web_search"],
                     }
                 ],
             }
