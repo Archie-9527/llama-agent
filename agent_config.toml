@@ -71,17 +71,48 @@ request_timeout = 60.0
 disable_thinking = true
 
 [tools]
-enabled_tools = ["execute_shell_command", "fetch_url", "web_search", "count_lines"]
+enabled_tools = [
+  "execute_shell_command",
+  "count_lines",
+  "get_file_metadata",
+  "read_file",
+  "search_file",
+  "aggregate_log_errors",
+  "search_log",
+  "get_log_window",
+  "describe_sqlite_table",
+  "query_sqlite",
+  "get_artifact_summary",
+  "retrieve_artifact",
+  "search_artifact",
+]
 
 [tools.providers.shell]
 # R0 的大型工具输出工作负载需要保留原始输出；后续 R1 将由 ArtifactStore
 # 取代直接内联。安全性仍由命令白名单、shell=False 和 timeout 保证。
 max_output_chars = 300000
 
-[tools.providers.web]
-
 [tools.providers.skills]
 skills_dir = "src/agent_core/capabilities/skills"
+
+[tools.providers.file]
+allowed_roots = ["."]
+max_read_chars = 300000
+max_matches = 50
+
+[tools.providers.log]
+allowed_roots = ["."]
+max_matches = 50
+max_window_lines = 40
+
+[tools.providers.sqlite]
+allowed_roots = ["."]
+max_rows = 100
+
+[tools.providers.artifact]
+storage_dir = "data/artifacts"
+max_retrieve_bytes = 8192
+max_search_matches = 10
 
 # ---------------------------------------------------------------------------
 # Benchmark/运行时遥测。普通 run 默认关闭，benchmark worker 会强制开启。

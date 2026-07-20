@@ -63,17 +63,18 @@ def register(
     Usage::
 
         @register(
-            name="web_search",
-            description="Search the web for information.",
+            name="search_log",
+            description="Search a local log for evidence.",
             input_schema={
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "Search query"},
+                    "log_path": {"type": "string"},
+                    "query": {"type": "string"},
                 },
-                "required": ["query"],
+                "required": ["log_path", "query"],
             },
         )
-        def web_search(query: str) -> str:
+        def search_log(log_path: str, query: str) -> str:
             ...
 
     Args:

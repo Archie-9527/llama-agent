@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -71,7 +72,13 @@ def _run_conversation_case(
         if result.get("status") != "done":
             failed_turn_index = turn_index
 
-    return result, turn_results, failed_turn_index
+    combined_result = dict(result)
+    combined_result["execution_log"] = [
+        record
+        for turn_result in turn_results
+        for record in turn_result.get("execution_log", [])
+    ]
+    return combined_result, turn_results, failed_turn_index
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -104,6 +111,9 @@ def main(argv: list[str] | None = None) -> int:
         collector.record_process()
         initialize_engine(load_engine_config(args.config))
         collector.record_process()
+        os.environ["AGENT_ARTIFACT_STORAGE_DIR"] = str(
+            args.output_dir / "artifacts"
+        )
         bootstrap_capabilities(load_tools_config(args.config))
         initialize_react_agent()
 

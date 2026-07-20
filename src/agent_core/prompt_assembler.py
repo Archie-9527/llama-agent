@@ -150,7 +150,13 @@ def _build_history_messages(execution_log: list[dict]) -> list[BaseMessage]:
             messages.append(
                 AIMessage(
                     content="",
-                    tool_calls=[{"name": entry["tool_used"], "args": {}, "id": call_id}],
+                    tool_calls=[
+                        {
+                            "name": entry["tool_used"],
+                            "args": dict(entry.get("tool_args") or {}),
+                            "id": call_id,
+                        }
+                    ],
                 )
             )
             messages.append(ToolMessage(content=entry["result"], tool_call_id=call_id))

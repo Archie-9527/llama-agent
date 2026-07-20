@@ -43,8 +43,10 @@ llama-agent --config agent_config.toml benchmark \
   --round R0
 ```
 
-快速连通性检查使用 `r0_smoke.json`；正式第一轮使用覆盖 W1–W5、4–256 KiB
-工具输出和单 Engine 多任务竞争的 `benchmark/workloads/r0_full.json`。
+快速连通性检查使用 `r0_smoke.json`；正式第一轮使用
+`benchmark/workloads/r0_full.json`，覆盖本地文件、结构化日志、只读 SQLite、
+16/64 KiB 工具输出、多工具证据链、失败恢复、八轮会话和工具证据跨轮引用。
+网络 Provider 已移除，所有 fixture 均由 worker 在样本目录内确定性生成。
 
 每个 warmup/测量样本在新的 Python 进程中加载模型并执行，避免 llama.cpp
 分配器、KV 状态或上一个任务污染后续样本。输出目录包含：

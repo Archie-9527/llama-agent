@@ -150,6 +150,15 @@ def get_telemetry() -> TelemetryCollector:
     return _collector
 
 
+def current_task_id() -> str | None:
+    """Return the active task identity for task-scoped stores and tools."""
+    task_id = _task_id_var.get()
+    if task_id is not None:
+        return task_id
+    with _collector._context_lock:
+        return _collector._active_task_id
+
+
 @contextlib.contextmanager
 def telemetry_task(task_id: str) -> Iterator[None]:
     collector = get_telemetry()

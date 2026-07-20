@@ -253,7 +253,7 @@ class TestToolCallGrammar:
     """Acceptance: build_tool_call_grammar output has correct tool + arguments."""
 
     SEARCH_TOOL = {
-        "name": "web_search",
+        "name": "search_log",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -290,7 +290,7 @@ class TestToolCallGrammar:
     def test_tool_name_appears_in_grammar(self):
         result = build_tool_call_grammar([self.SEARCH_TOOL])
         result = result._grammar
-        assert "web_search" in result
+        assert "search_log" in result
 
     def test_missing_name_raises_grammar_compile_error(self):
         bad_tool = {"input_schema": {"type": "object"}}
@@ -323,14 +323,14 @@ class TestToolCallGrammar:
             [
                 {
                     "role": "user",
-                    "content": 'Call web_search with query "machine learning" and limit 5',
+                    "content": 'Call search_log with query "DB_POOL" and limit 5',
                 }
             ],
             grammar=grammar,
         )
 
         parsed = json.loads(result.content)
-        assert parsed["tool"] == "web_search"
+        assert parsed["tool"] == "search_log"
         assert isinstance(parsed["arguments"], dict)
         assert "query" in parsed["arguments"]
 

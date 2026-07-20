@@ -1,6 +1,6 @@
 """Capability provider core abstraction — the plugin architecture.
 
-Every category of capability (shell, web, skills, MCP, …) is a
+Every category of capability (file, log, SQLite, artifact, skills, …) is a
 ``CapabilityProvider`` subclass that lives in its own file under
 ``providers/``.  Adding a new category means adding a single new file
 — zero changes to any existing module.

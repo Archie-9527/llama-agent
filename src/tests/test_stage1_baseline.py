@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 from unittest.mock import MagicMock
 from unittest.mock import patch
@@ -8,6 +9,7 @@ from unittest.mock import patch
 from agent_core.benchmark.aggregator import aggregate_run
 from agent_core.benchmark.evaluator import evaluate
 from agent_core.benchmark.models import BenchmarkCase, BenchmarkSuite
+from agent_core.benchmark.runner import _prepare_case
 from agent_core.benchmark.worker import _run_conversation_case
 from agent_core.conversation.models import Turn
 from agent_core.conversation.manager import ConversationConfig, ConversationManager
@@ -118,7 +120,9 @@ def test_benchmark_conversation_stops_after_first_failed_turn():
         ("记住 AgentMem", "上一轮的代号是什么？"),
     )
 
-    assert result is failed_result
+    assert result["status"] == failed_result["status"]
+    assert result["error"] == failed_result["error"]
+    assert result["execution_log"] == []
     assert failed_index == 0
     assert turns[0]["error"] == "empty response"
     assert turns[1]["status"] == "skipped_due_to_previous_failure"
@@ -165,7 +169,7 @@ def test_benchmark_suite_and_evaluator(tmp_path: Path):
                         "goal": "count",
                         "expected_contains": ["42"],
                         "expected_tools": ["count_lines"],
-                        "forbidden_tools": ["web_search"],
+                        "forbidden_tools": ["query_sqlite"],
                     }
                 ],
             }
@@ -178,6 +182,53 @@ def test_benchmark_suite_and_evaluator(tmp_path: Path):
         "execution_log": [{"tool_used": "count_lines"}],
     }
     assert evaluate(suite.cases[0], result)["passed"] is True
+
+
+def test_evaluator_checks_tool_order_and_count():
+    case = BenchmarkCase(
+        case_id="ordered",
+        category="tools",
+        expected_tool_sequence=("search_log", "query_sqlite"),
+        min_tool_calls=2,
+        max_tool_calls=2,
+    )
+    correct = {
+        "status": "done",
+        "final_answer": "complete",
+        "execution_log": [
+            {"tool_used": "search_log"},
+            {"tool_used": "query_sqlite"},
+        ],
+    }
+    reversed_result = {
+        **correct,
+        "execution_log": list(reversed(correct["execution_log"])),
+    }
+    assert evaluate(case, correct)["passed"] is True
+    assert evaluate(case, reversed_result)["checks"]["tool_sequence"] is False
+
+
+def test_prepare_case_builds_deterministic_local_evidence(tmp_path: Path):
+    case = BenchmarkCase(
+        case_id="fixture",
+        category="fixture",
+        goal="inspect {log_path} {db_path} {config_path} {fixture_path}",
+        metadata={
+            "incident_fixture": True,
+            "fixture_size_bytes": 4096,
+            "fixture_marker": "ONLY_ONCE",
+        },
+    )
+    raw = _prepare_case(case, tmp_path / "sample")
+    assert "{" not in raw["goal"]
+    payload = (tmp_path / "sample" / "payload.txt").read_text()
+    assert payload.count("ONLY_ONCE") == 1
+    assert payload.endswith("root_cause=connection_pool_exhausted\n")
+    with sqlite3.connect(tmp_path / "sample" / "incidents.sqlite") as connection:
+        row = connection.execute(
+            "SELECT root_cause FROM incidents WHERE request_id='req-7319'"
+        ).fetchone()
+    assert row == ("connection_pool_exhausted",)
 
 
 def test_aggregator_keeps_failed_samples(tmp_path: Path):

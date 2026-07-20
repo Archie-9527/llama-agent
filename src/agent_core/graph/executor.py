@@ -119,6 +119,7 @@ def _extract_execution_result(
                         "step": current_step,
                         "result": matching_tool_msg.content,
                         "tool_used": call["name"],
+                        "tool_args": dict(call.get("args") or {}),
                     }
                 )
         elif isinstance(msg, AIMessage) and not getattr(msg, "tool_calls", None):

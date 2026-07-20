@@ -1,103 +1,156 @@
 {
-  "name": "r0-full",
+  "name": "r0-full-local-agent",
   "seed": 42,
   "warmup_runs": 1,
   "measured_runs": 5,
   "cases": [
     {
-      "case_id": "w1-local-tool",
-      "category": "W1-local-tool",
-      "goal": "使用 count_lines 工具统计 src/agent_core/llm_engine.py 的代码行数，并明确说明文件名和结果。",
+      "case_id": "w1-file-inspection",
+      "category": "W1-file",
+      "goal": "先调用 get_file_metadata 检查 {document_path}，再调用 read_file 从 offset=0 读取 length=4096，最后回答服务名、负责人和 runbook。必须实际按顺序调用这两个工具。",
       "expected_status": "done",
-      "expected_contains": ["llm_engine.py"],
-      "expected_tools": ["count_lines"]
+      "expected_contains": ["payment-api", "AgentMem-Team", "RB-2048"],
+      "expected_tool_result_contains": ["payment-api", "AgentMem-Team", "RB-2048"],
+      "expected_tools": ["get_file_metadata", "read_file"],
+      "expected_tool_sequence": ["get_file_metadata", "read_file"],
+      "min_tool_calls": 2,
+      "max_tool_calls": 3,
+      "forbidden_tools": ["execute_shell_command", "count_lines", "get_artifact_summary", "retrieve_artifact", "search_artifact"],
+      "metadata": {"document_fixture": true}
     },
     {
-      "case_id": "w2-tool-output-4k",
-      "category": "W2-large-tool-output",
-      "goal": "使用 execute_shell_command 执行 cat {fixture_path}，然后说明结果中出现的标记 AGENTMEM_PAYLOAD。必须实际调用工具。",
+      "case_id": "w2-sqlite-investigation",
+      "category": "W2-sqlite",
+      "goal": "先使用 describe_sqlite_table 查看 {db_path} 中 incidents 表结构，再使用 query_sqlite 查询 request_id='req-7319' 的记录。回答 service、severity、root_cause、runbook 和 resolved。只允许只读查询。",
       "expected_status": "done",
-      "expected_contains": ["AGENTMEM_PAYLOAD"],
-      "expected_tools": ["execute_shell_command"],
-      "metadata": {
-        "fixture_size_bytes": 4096,
-        "fixture_marker": "AGENTMEM_PAYLOAD"
-      }
+      "expected_contains": ["payment-api", "critical", "connection_pool_exhausted", "RB-2048"],
+      "expected_tool_result_contains": ["req-7319", "connection_pool_exhausted", "RB-2048"],
+      "expected_tools": ["describe_sqlite_table", "query_sqlite"],
+      "expected_tool_sequence": ["describe_sqlite_table", "query_sqlite"],
+      "min_tool_calls": 2,
+      "max_tool_calls": 4,
+      "forbidden_tools": ["execute_shell_command", "count_lines", "get_artifact_summary", "retrieve_artifact", "search_artifact"],
+      "metadata": {"incident_fixture": true}
     },
     {
-      "case_id": "w2-tool-output-16k",
-      "category": "W2-large-tool-output",
-      "goal": "使用 execute_shell_command 执行 cat {fixture_path}，然后说明结果中出现的标记 AGENTMEM_PAYLOAD。必须实际调用工具。",
+      "case_id": "w3-log-analysis",
+      "category": "W3-log",
+      "goal": "分析日志 {log_path}：先调用 aggregate_log_errors 汇总，再调用 search_log 搜索 DB_POOL_EXHAUSTED，最后用 get_log_window 读取命中行前后各1行。回答错误时间、request_id、node、错误码和前一条告警码。",
       "expected_status": "done",
-      "expected_contains": ["AGENTMEM_PAYLOAD"],
-      "expected_tools": ["execute_shell_command"],
+      "expected_contains": ["14:03:27", "req-7319", "db-worker-2", "DB_POOL_EXHAUSTED", "POOL_PRESSURE"],
+      "expected_tool_result_contains": ["DB_POOL_EXHAUSTED", "POOL_PRESSURE", "req-7319"],
+      "expected_tools": ["aggregate_log_errors", "search_log", "get_log_window"],
+      "expected_tool_sequence": ["aggregate_log_errors", "search_log", "get_log_window"],
+      "min_tool_calls": 3,
+      "max_tool_calls": 5,
+      "forbidden_tools": ["execute_shell_command", "count_lines", "get_artifact_summary", "retrieve_artifact", "search_artifact"],
+      "metadata": {"incident_fixture": true}
+    },
+    {
+      "case_id": "w4-large-file-16k",
+      "category": "W4-large-output",
+      "goal": "调用 read_file 从 offset=0 开始读取 {fixture_path}，length=20000，必须基于真实文件内容回答 FINAL_EVIDENCE 中的 marker、request_id 和 root_cause。",
+      "expected_status": "done",
+      "expected_contains": ["AGENTMEM_16K", "req-7319", "connection_pool_exhausted"],
+      "expected_tool_result_contains": ["AGENTMEM_16K", "req-7319", "connection_pool_exhausted"],
+      "expected_tools": ["read_file"],
+      "expected_tool_sequence": ["read_file"],
+      "min_tool_calls": 1,
+      "max_tool_calls": 2,
+      "forbidden_tools": ["execute_shell_command", "count_lines", "get_artifact_summary", "retrieve_artifact", "search_artifact"],
       "metadata": {
         "fixture_size_bytes": 16384,
-        "fixture_marker": "AGENTMEM_PAYLOAD"
+        "fixture_marker": "AGENTMEM_16K"
       }
     },
     {
-      "case_id": "w2-tool-output-64k",
-      "category": "W2-large-tool-output",
-      "goal": "使用 execute_shell_command 执行 cat {fixture_path}，然后说明结果中出现的标记 AGENTMEM_PAYLOAD。必须实际调用工具。",
+      "case_id": "w4-large-file-64k",
+      "category": "W4-large-output",
+      "goal": "调用 read_file 从 offset=0 开始读取 {fixture_path}，length=70000，必须基于真实文件末尾 FINAL_EVIDENCE 回答 marker、request_id 和 root_cause。",
       "expected_status": "done",
-      "expected_contains": ["AGENTMEM_PAYLOAD"],
-      "expected_tools": ["execute_shell_command"],
+      "expected_contains": ["AGENTMEM_64K", "req-7319", "connection_pool_exhausted"],
+      "expected_tool_result_contains": ["AGENTMEM_64K", "req-7319", "connection_pool_exhausted"],
+      "expected_tools": ["read_file"],
+      "expected_tool_sequence": ["read_file"],
+      "min_tool_calls": 1,
+      "max_tool_calls": 2,
+      "forbidden_tools": ["execute_shell_command", "count_lines", "get_artifact_summary", "retrieve_artifact", "search_artifact"],
       "metadata": {
         "fixture_size_bytes": 65536,
-        "fixture_marker": "AGENTMEM_PAYLOAD"
+        "fixture_marker": "AGENTMEM_64K"
       }
     },
     {
-      "case_id": "w2-tool-output-256k",
-      "category": "W2-large-tool-output",
-      "goal": "使用 execute_shell_command 执行 cat {fixture_path}，然后说明结果中出现的标记 AGENTMEM_PAYLOAD。必须实际调用工具。",
+      "case_id": "w5-multi-tool-incident",
+      "category": "W5-multi-stage",
+      "goal": "调查 payment-api 故障。第一步用 search_log 在 {log_path} 搜索 DB_POOL_EXHAUSTED 并取得 request_id；第二步再次用 search_log 搜索同一 request_id 的 POOL_RECOVERED；第三步用 query_sqlite 在 {db_path} 的 incidents 表查询该 request_id；第四步用 search_file 在 {config_path} 查找 runbook。最终回答 request_id、root_cause、runbook、是否恢复，并列出日志、数据库和配置三类证据。",
       "expected_status": "done",
-      "expected_contains": ["AGENTMEM_PAYLOAD"],
-      "expected_tools": ["execute_shell_command"],
-      "metadata": {
-        "fixture_size_bytes": 262144,
-        "fixture_marker": "AGENTMEM_PAYLOAD"
-      }
+      "expected_contains": ["req-7319", "connection_pool_exhausted", "RB-2048", "POOL_RECOVERED"],
+      "expected_tool_result_contains": ["req-7319", "connection_pool_exhausted", "RB-2048", "POOL_RECOVERED"],
+      "expected_tools": ["search_log", "query_sqlite", "search_file"],
+      "expected_tool_sequence": ["search_log", "search_log", "query_sqlite", "search_file"],
+      "min_tool_calls": 4,
+      "max_tool_calls": 6,
+      "forbidden_tools": ["execute_shell_command", "count_lines", "get_artifact_summary", "retrieve_artifact", "search_artifact"],
+      "metadata": {"incident_fixture": true}
     },
     {
-      "case_id": "w3-four-turn-reference",
-      "category": "W3-conversation",
+      "case_id": "w6-readonly-recovery",
+      "category": "W6-failure-recovery",
+      "goal": "先调用 query_sqlite 尝试对 {db_path} 执行 DELETE FROM incidents WHERE request_id='req-7319'，确认只读保护拒绝后，再调用 query_sqlite 使用 SELECT 查询该记录。最终明确说明写操作被拒绝且记录仍存在，并给出 request_id 和 runbook。",
+      "expected_status": "done",
+      "expected_contains": ["req-7319", "RB-2048"],
+      "expected_tool_result_contains": ["only one read-only", "req-7319", "RB-2048"],
+      "expected_tools": ["query_sqlite"],
+      "expected_tool_sequence": ["query_sqlite", "query_sqlite"],
+      "min_tool_calls": 2,
+      "max_tool_calls": 3,
+      "forbidden_tools": ["execute_shell_command", "count_lines", "get_artifact_summary", "retrieve_artifact", "search_artifact"],
+      "metadata": {"incident_fixture": true}
+    },
+    {
+      "case_id": "w7-eight-turn-memory",
+      "category": "W7-conversation",
       "turns": [
-        "记住项目代号是 AgentMem，并直接告诉我你记住了什么。",
-        "记住基线轮次是 R0。",
-        "告诉我上一轮提到的基线轮次。",
-        "综合此前对话，项目代号和基线轮次分别是什么？"
+        "记住项目代号是 AgentMem。",
+        "记住部署环境是 openEuler。",
+        "记住服务名称是 payment-api。",
+        "最初端口是 8080。",
+        "把端口修正为 9090，旧端口不再有效。",
+        "记住故障请求号是 req-7319。",
+        "上一轮故障请求号是什么？同时告诉我当前有效端口。",
+        "综合此前对话，回答项目代号、部署环境、服务、当前端口和故障请求号。"
       ],
       "expected_status": "done",
-      "expected_contains": ["AgentMem", "R0"],
+      "expected_contains": ["AgentMem", "openEuler", "payment-api", "9090", "req-7319"],
+      "min_tool_calls": 0,
+      "max_tool_calls": 0,
       "forbidden_tools": [
-        "web_search",
-        "fetch_url",
-        "execute_shell_command",
-        "count_lines"
+        "get_file_metadata", "read_file", "search_file",
+        "aggregate_log_errors", "search_log", "get_log_window",
+        "describe_sqlite_table", "query_sqlite",
+        "get_artifact_summary", "retrieve_artifact", "search_artifact"
       ]
     },
     {
-      "case_id": "w4-tool-failure",
-      "category": "W4-failure",
-      "goal": "尝试使用 execute_shell_command 执行不在白名单中的命令 uname -a，并如实说明工具是否成功，不要虚构结果。",
-      "expected_status": "done",
-      "expected_contains": ["uname"],
-      "expected_tools": ["execute_shell_command"]
-    },
-    {
-      "case_id": "w5-four-tasks",
-      "category": "W5-multi-task",
-      "tasks": [
-        "使用 count_lines 统计 src/agent_core/config.py 的行数。",
-        "使用 count_lines 统计 src/agent_core/session.py 的行数。",
-        "使用 count_lines 统计 src/agent_core/graph/executor.py 的行数。",
-        "使用 count_lines 统计 src/agent_core/llm_engine.py 的行数。"
+      "case_id": "w8-tool-to-conversation-memory",
+      "category": "W8-tool-conversation",
+      "turns": [
+        "使用 search_log 在 {log_path} 搜索 DB_POOL_EXHAUSTED，告诉我 request_id、node 和错误时间。",
+        "记住上一轮得到的是已验证的日志证据。",
+        "不要再次调用工具，直接回答第一轮日志证据中的 request_id、node 和错误时间。"
       ],
-      "concurrency": 4,
       "expected_status": "done",
-      "expected_tools": ["count_lines"]
+      "expected_contains": ["req-7319", "db-worker-2", "14:03:27"],
+      "expected_tool_result_contains": ["req-7319", "db-worker-2", "14:03:27"],
+      "expected_tools": ["search_log"],
+      "expected_tool_sequence": ["search_log"],
+      "min_tool_calls": 1,
+      "max_tool_calls": 1,
+      "forbidden_tools": [
+        "get_artifact_summary", "retrieve_artifact", "search_artifact"
+      ],
+      "metadata": {"incident_fixture": true}
     }
   ]
 }

@@ -15,8 +15,6 @@
       "expected_status": "done",
       "expected_contains": ["AgentMem", "7319"],
       "forbidden_tools": [
-        "web_search",
-        "fetch_url",
         "execute_shell_command",
         "count_lines"
       ]

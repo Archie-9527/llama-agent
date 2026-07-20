@@ -198,14 +198,14 @@ class TestBuildHistoryMessages:
     """Acceptance: execution_log entries → proper BaseMessage sequence."""
 
     def test_tool_used_entry_creates_pair(self):
-        log = [{"step": "search", "result": "found it", "tool_used": "web_search"}]
+        log = [{"step": "search", "result": "found it", "tool_used": "search_log"}]
         msgs = _build_history_messages(log)
         # HumanMessage(step) → AIMessage(tool_calls) → ToolMessage(result)
         assert isinstance(msgs[0], HumanMessage)
         assert msgs[0].content == "search"
         assert isinstance(msgs[1], AIMessage)
         assert msgs[1].tool_calls
-        assert msgs[1].tool_calls[0]["name"] == "web_search"
+        assert msgs[1].tool_calls[0]["name"] == "search_log"
         assert isinstance(msgs[2], ToolMessage)
         assert msgs[2].content == "found it"
 

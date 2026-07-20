@@ -18,8 +18,12 @@ class BenchmarkCase:
     concurrency: int = 1
     expected_status: str = "done"
     expected_contains: tuple[str, ...] = ()
+    expected_tool_result_contains: tuple[str, ...] = ()
     expected_tools: tuple[str, ...] = ()
+    expected_tool_sequence: tuple[str, ...] = ()
     forbidden_tools: tuple[str, ...] = ()
+    min_tool_calls: int = 0
+    max_tool_calls: int | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -35,11 +39,24 @@ class BenchmarkCase:
             expected_contains=tuple(
                 str(item) for item in raw.get("expected_contains", [])
             ),
+            expected_tool_result_contains=tuple(
+                str(item)
+                for item in raw.get("expected_tool_result_contains", [])
+            ),
             expected_tools=tuple(
                 str(item) for item in raw.get("expected_tools", [])
             ),
+            expected_tool_sequence=tuple(
+                str(item) for item in raw.get("expected_tool_sequence", [])
+            ),
             forbidden_tools=tuple(
                 str(item) for item in raw.get("forbidden_tools", [])
+            ),
+            min_tool_calls=int(raw.get("min_tool_calls", 0)),
+            max_tool_calls=(
+                int(raw["max_tool_calls"])
+                if raw.get("max_tool_calls") is not None
+                else None
             ),
             metadata=dict(raw.get("metadata", {})),
         )
@@ -54,8 +71,14 @@ class BenchmarkCase:
             "concurrency": self.concurrency,
             "expected_status": self.expected_status,
             "expected_contains": list(self.expected_contains),
+            "expected_tool_result_contains": list(
+                self.expected_tool_result_contains
+            ),
             "expected_tools": list(self.expected_tools),
+            "expected_tool_sequence": list(self.expected_tool_sequence),
             "forbidden_tools": list(self.forbidden_tools),
+            "min_tool_calls": self.min_tool_calls,
+            "max_tool_calls": self.max_tool_calls,
             "metadata": self.metadata,
         }
 
@@ -82,4 +105,14 @@ class BenchmarkSuite:
             raise ValueError("benchmark suite must contain at least one case")
         if suite.measured_runs < 1 or suite.warmup_runs < 0:
             raise ValueError("invalid warmup_runs/measured_runs")
+        for case in suite.cases:
+            if case.min_tool_calls < 0:
+                raise ValueError(f"{case.case_id}: min_tool_calls must be >= 0")
+            if (
+                case.max_tool_calls is not None
+                and case.max_tool_calls < case.min_tool_calls
+            ):
+                raise ValueError(
+                    f"{case.case_id}: max_tool_calls must be >= min_tool_calls"
+                )
         return suite

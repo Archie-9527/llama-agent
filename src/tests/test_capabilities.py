@@ -1,9 +1,9 @@
 """Tests for the V3.0 capability layer and graph improvements.
 
-Covers:
+Coverage:
     - capabilities/base.py (auto-discovery, registration, isolation)
     - capabilities/bootstrap.py (ToolsConfig, build_capability_map, bootstrap)
-    - capabilities/providers/* (shell, web, skills)
+    - capabilities/providers/* (shell, file, log, sqlite, artifact, skills)
     - build_graph.py V3 (normalize_entry_state, error isolation, routing)
 """
 
@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sqlite3
 import sys
 from pathlib import Path
 from typing import Any
@@ -44,7 +45,14 @@ from agent_core.capabilities.bootstrap import (
     get_enabled_capabilities,
 )
 from agent_core.capabilities.providers.shell_provider import ShellCapabilityProvider
-from agent_core.capabilities.providers.web_provider import WebCapabilityProvider
+from agent_core.capabilities.providers.file_provider import FileCapabilityProvider
+from agent_core.capabilities.providers.log_provider import LogCapabilityProvider
+from agent_core.capabilities.providers.sqlite_provider import SqliteCapabilityProvider
+from agent_core.capabilities.providers.artifact_provider import (
+    ArtifactCapabilityProvider,
+)
+from agent_core.artifacts import ArtifactStore
+from agent_core.telemetry import telemetry_task
 from agent_core.capabilities.providers.skills_provider import (
     SkillsCapabilityProvider,
     SkillsToolConfig,
@@ -98,7 +106,10 @@ class TestAutoDiscovery:
     def test_default_providers_registered(self):
         categories = all_registered_categories()
         assert "shell" in categories
-        assert "web" in categories
+        assert "file" in categories
+        assert "log" in categories
+        assert "sqlite" in categories
+        assert "artifact" in categories
         assert "skills" in categories
 
     def test_new_provider_via_decorator(self):
@@ -231,7 +242,7 @@ class TestBootstrap:
 
 
 # ============================================================================
-# Shell / Web / Skills provider tests
+# Built-in provider tests
 # ============================================================================
 
 
@@ -263,17 +274,160 @@ class TestShellProvider:
             provider.build({"skills_dir": None})
 
 
-class TestWebProvider:
-    def test_unconfigured_search_is_not_exposed(self):
-        provider = WebCapabilityProvider()
-        caps = provider.build({})
-        names = {c.name for c in caps}
-        assert names == {"fetch_url"}
+class TestFileProvider:
+    def test_metadata_read_and_search(self, tmp_path):
+        target = tmp_path / "notes.txt"
+        target.write_text("alpha\nrunbook=RB-2048\nomega", encoding="utf-8")
+        capabilities = {
+            item.name: item
+            for item in FileCapabilityProvider().build(
+                {"allowed_roots": [str(tmp_path)]}
+            )
+        }
+        metadata = json.loads(
+            capabilities["get_file_metadata"].handler(file_path=str(target))
+        )
+        content = json.loads(
+            capabilities["read_file"].handler(
+                file_path=str(target), offset=6, length=15
+            )
+        )
+        matches = json.loads(
+            capabilities["search_file"].handler(
+                file_path=str(target), query="RB-2048"
+            )
+        )
+        assert metadata["size_bytes"] == target.stat().st_size
+        assert "runbook" in content["content"]
+        assert matches["matches"][0]["line_number"] == 2
 
-    def test_configured_search_is_exposed(self):
-        provider = WebCapabilityProvider()
-        caps = provider.build({"search_api_url": "https://search.invalid/api"})
-        assert {c.name for c in caps} == {"fetch_url", "web_search"}
+    def test_rejects_path_outside_roots(self, tmp_path):
+        capabilities = {
+            item.name: item
+            for item in FileCapabilityProvider().build(
+                {"allowed_roots": [str(tmp_path / "allowed")]}
+            )
+        }
+        result = json.loads(
+            capabilities["read_file"].handler(file_path="/etc/hosts")
+        )
+        assert result["success"] is False
+        assert "outside configured roots" in result["error"]
+
+
+class TestLogProvider:
+    def test_aggregate_search_and_window(self, tmp_path):
+        log = tmp_path / "incident.log"
+        log.write_text(
+            "INFO code=START node=api\n"
+            "WARN code=POOL_PRESSURE node=db\n"
+            "ERROR code=DB_POOL_EXHAUSTED node=db\n",
+            encoding="utf-8",
+        )
+        capabilities = {
+            item.name: item
+            for item in LogCapabilityProvider().build(
+                {"allowed_roots": [str(tmp_path)]}
+            )
+        }
+        aggregate = json.loads(
+            capabilities["aggregate_log_errors"].handler(log_path=str(log))
+        )
+        search = json.loads(
+            capabilities["search_log"].handler(
+                log_path=str(log), query="DB_POOL_EXHAUSTED"
+            )
+        )
+        window = json.loads(
+            capabilities["get_log_window"].handler(
+                log_path=str(log), line_number=3, before=1, after=0
+            )
+        )
+        assert aggregate["levels"]["ERROR"] == 1
+        assert search["matches"][0]["line_number"] == 3
+        assert window["lines"][0]["line_number"] == 2
+
+
+class TestSqliteProvider:
+    def test_describe_select_and_reject_write(self, tmp_path):
+        db = tmp_path / "test.sqlite"
+        with sqlite3.connect(db) as connection:
+            connection.execute("CREATE TABLE incidents (id TEXT, code TEXT)")
+            connection.execute(
+                "INSERT INTO incidents VALUES ('req-1', 'DB_POOL_EXHAUSTED')"
+            )
+        capabilities = {
+            item.name: item
+            for item in SqliteCapabilityProvider().build(
+                {"allowed_roots": [str(tmp_path)]}
+            )
+        }
+        described = json.loads(
+            capabilities["describe_sqlite_table"].handler(
+                db_path=str(db), table_name="incidents"
+            )
+        )
+        selected = json.loads(
+            capabilities["query_sqlite"].handler(
+                db_path=str(db), query="SELECT * FROM incidents"
+            )
+        )
+        rejected = json.loads(
+            capabilities["query_sqlite"].handler(
+                db_path=str(db), query="DELETE FROM incidents"
+            )
+        )
+        assert [item["name"] for item in described["columns"]] == ["id", "code"]
+        assert selected["rows"][0]["id"] == "req-1"
+        assert rejected["success"] is False
+        with sqlite3.connect(db) as connection:
+            assert connection.execute("SELECT count(*) FROM incidents").fetchone()[0] == 1
+
+
+class TestArtifactProvider:
+    def test_read_tools_enforce_task_ownership(self, tmp_path):
+        store = ArtifactStore(tmp_path)
+        metadata = store.put(
+            "prefix DB_POOL_EXHAUSTED suffix",
+            owner_id="task-a",
+            tool_name="search_log",
+            summary="one database error",
+        )
+        capabilities = {
+            item.name: item
+            for item in ArtifactCapabilityProvider().build(
+                {"storage_dir": str(tmp_path)}
+            )
+        }
+        with telemetry_task("task-a"):
+            summary = json.loads(
+                capabilities["get_artifact_summary"].handler(
+                    artifact_id=metadata.artifact_id
+                )
+            )
+            search = json.loads(
+                capabilities["search_artifact"].handler(
+                    artifact_id=metadata.artifact_id,
+                    query="DB_POOL_EXHAUSTED",
+                )
+            )
+            chunk = json.loads(
+                capabilities["retrieve_artifact"].handler(
+                    artifact_id=metadata.artifact_id,
+                    offset=7,
+                    length=17,
+                )
+            )
+        with telemetry_task("task-b"):
+            denied = json.loads(
+                capabilities["get_artifact_summary"].handler(
+                    artifact_id=metadata.artifact_id
+                )
+            )
+        assert summary["summary"] == "one database error"
+        assert search["match_count"] == 1
+        assert "DB_POOL" in chunk["content"]
+        assert denied["success"] is False
 
 
 class TestSkillsProvider:

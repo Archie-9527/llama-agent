@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import platform
+import sqlite3
 import subprocess
 import sys
 import uuid
@@ -296,13 +297,149 @@ def _consolidate_telemetry(run_dir: Path) -> None:
 def _prepare_case(case, sample_dir: Path) -> dict[str, Any]:
     """Materialize deterministic local fixtures requested by workload metadata."""
     raw = case.to_dict()
+    sample_dir.mkdir(parents=True, exist_ok=True)
+    replacements: dict[str, str] = {}
+
     size = int(case.metadata.get("fixture_size_bytes", 0))
     if size > 0:
-        sample_dir.mkdir(parents=True, exist_ok=True)
         marker = str(case.metadata.get("fixture_marker", "AGENTMEM_PAYLOAD"))
-        unit = (marker + "\n").encode("utf-8")
-        payload = (unit * (size // len(unit) + 1))[:size]
         fixture = sample_dir / "payload.txt"
-        fixture.write_bytes(payload)
-        raw["goal"] = raw["goal"].replace("{fixture_path}", str(fixture))
-    return raw
+        _write_payload_fixture(fixture, size=size, marker=marker)
+        replacements["{fixture_path}"] = str(fixture)
+
+    if case.metadata.get("incident_fixture"):
+        replacements.update(_write_incident_fixture(sample_dir))
+
+    if case.metadata.get("document_fixture"):
+        document = sample_dir / "service_notes.txt"
+        document.write_text(
+            "\n".join(
+                [
+                    "service=payment-api",
+                    "owner=AgentMem-Team",
+                    "region=cn-north-4",
+                    "runbook=RB-2048",
+                    "status=active",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        replacements["{document_path}"] = str(document)
+
+    return _replace_placeholders(raw, replacements)
+
+
+def _write_payload_fixture(path: Path, *, size: int, marker: str) -> None:
+    """Create non-repetitive filler with one marker near the end."""
+    critical = (
+        f"\nFINAL_EVIDENCE marker={marker} request_id=req-7319 "
+        "root_cause=connection_pool_exhausted\n"
+    ).encode("utf-8")
+    filler_lines = []
+    index = 0
+    target = max(0, size - len(critical))
+    written = 0
+    while written < target:
+        line = (
+            f"record={index:06d} status=ok latency_ms={20 + index % 17} "
+            f"checksum={(index * 2654435761) & 0xFFFFFFFF:08x}\n"
+        ).encode("utf-8")
+        filler_lines.append(line)
+        written += len(line)
+        index += 1
+    payload = b"".join(filler_lines)[:target] + critical
+    path.write_bytes(payload[:size])
+
+
+def _write_incident_fixture(sample_dir: Path) -> dict[str, str]:
+    log_path = sample_dir / "incident.log"
+    log_path.write_text(
+        "\n".join(
+            [
+                "2026-07-18T14:03:20 INFO code=REQUEST_START "
+                "request_id=req-7319 node=api-1",
+                "2026-07-18T14:03:24 WARN code=POOL_PRESSURE "
+                "request_id=req-7319 node=db-worker-2 active=48",
+                "2026-07-18T14:03:27 ERROR code=DB_POOL_EXHAUSTED "
+                "request_id=req-7319 node=db-worker-2",
+                "2026-07-18T14:03:28 ERROR code=PAYMENT_FAILED "
+                "request_id=req-7319 node=payment-api",
+                "2026-07-18T14:08:02 INFO code=POOL_RECOVERED "
+                "request_id=req-7319 node=db-worker-2",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    db_path = sample_dir / "incidents.sqlite"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute(
+            """
+            CREATE TABLE incidents (
+                request_id TEXT PRIMARY KEY,
+                service TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                root_cause TEXT NOT NULL,
+                runbook TEXT NOT NULL,
+                resolved INTEGER NOT NULL
+            )
+            """
+        )
+        connection.executemany(
+            "INSERT INTO incidents VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    "req-7319",
+                    "payment-api",
+                    "critical",
+                    "connection_pool_exhausted",
+                    "RB-2048",
+                    1,
+                ),
+                (
+                    "req-1002",
+                    "catalog-api",
+                    "warning",
+                    "cache_miss_spike",
+                    "RB-1001",
+                    1,
+                ),
+            ],
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    config_path = sample_dir / "service.conf"
+    config_path.write_text(
+        "\n".join(
+            [
+                "service=payment-api",
+                "db_pool_size=48",
+                "db_pool_timeout_ms=3000",
+                "runbook=RB-2048",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return {
+        "{log_path}": str(log_path),
+        "{db_path}": str(db_path),
+        "{config_path}": str(config_path),
+    }
+
+
+def _replace_placeholders(value: Any, replacements: dict[str, str]) -> Any:
+    if isinstance(value, str):
+        for marker, replacement in replacements.items():
+            value = value.replace(marker, replacement)
+        return value
+    if isinstance(value, list):
+        return [_replace_placeholders(item, replacements) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _replace_placeholders(item, replacements)
+            for key, item in value.items()
+        }
+    return value
