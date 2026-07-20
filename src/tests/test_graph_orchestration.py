@@ -46,6 +46,7 @@ from agent_core.graph.executor import (
     _build_react_input,
     _ensure_tool_summary,
     _extract_execution_result,
+    _is_tool_free_conversation_step,
     _normalize_output_messages,
     _recover_empty_response,
     _validate_required_tool_execution,
@@ -317,6 +318,8 @@ class TestExecutorStateBridging:
             },
         ]
         mock_engine = MagicMock()
+        mock_engine.n_ctx = 4096
+        mock_engine.get_num_tokens.side_effect = lambda text: len(str(text))
         mock_engine.invoke.return_value = AIMessage(
             content="llm_engine.py 共有 611 行代码。"
         )
@@ -441,6 +444,52 @@ class TestExecutorNode:
         assert result["execution_log"][0]["result"] == "Hello!"
         assert result["current_step_index"] == 1
         assert result["status"] == "reflecting"
+
+    def test_conversation_memory_step_never_initializes_react_agent(
+        self, base_state
+    ):
+        _register_test_tools()
+        base_state["task_goal"] = "记住项目代号是 AgentMem"
+        base_state["plan_steps"] = [
+            "记住项目代号是 AgentMem，并直接告诉用户记住了什么。"
+        ]
+        mock_engine = MagicMock()
+        mock_engine.n_ctx = 4096
+        mock_engine.get_num_tokens.side_effect = lambda text: len(str(text))
+        mock_engine.invoke.return_value = AIMessage(
+            content="我记住的项目代号是 AgentMem。"
+        )
+        mock_agent_factory = MagicMock()
+        mock_config = {"configurable": {"thread_id": "memory-thread"}}
+
+        with patch(
+            "agent_core.graph.executor.get_engine", return_value=mock_engine
+        ), patch(
+            "agent_core.graph.react_agent_factory.initialize_react_agent",
+            mock_agent_factory,
+        ):
+            result = executor_node(base_state, config=mock_config)  # type: ignore[call-arg]
+
+        assert result["execution_log"][-1]["result"] == (
+            "我记住的项目代号是 AgentMem。"
+        )
+        assert result["execution_log"][-1]["tool_used"] is None
+        assert result["status"] == "reflecting"
+        mock_agent_factory.assert_not_called()
+        messages = mock_engine.invoke.call_args.args[0]
+        assert "不允许调用任何工具" in messages[0].content
+        assert "execute_shell_command" not in messages[0].content
+
+    def test_tool_named_memory_step_is_not_classified_tool_free(self):
+        @register(
+            name="search_log",
+            description="Search logs",
+            input_schema={"type": "object", "properties": {}},
+        )
+        def search_log():
+            return "unused"
+
+        assert _is_tool_free_conversation_step("记住 search_log 的结果") is False
 
     def test_executor_multiple_steps_status_stays_executing(self, base_state):
         """A5: With 3 plan steps, executor stays at 'executing' until last step."""

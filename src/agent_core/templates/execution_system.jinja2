@@ -11,6 +11,10 @@
 {% if tools_section %}
 ## 可用工具
 {{ tools_section }}
+{% elif tool_free %}
+## 工具约束
+当前步骤是纯对话/记忆步骤，不需要也不允许调用任何工具。直接用自然语言回答，
+不要输出工具名称、函数调用、JSON 调用或 `functions.<name>:` 协议。
 {% endif %}
 
 ## 执行要求

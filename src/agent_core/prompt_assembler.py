@@ -301,6 +301,7 @@ def assemble_execution_prompt(
     engine: TokenCounter,
     tool_result: Optional[str] = None,
     reserved_for_generation: int = 512,
+    available_tools: Optional[list[Capability]] = None,
 ) -> list[BaseMessage]:
     """Assemble the message list for the **Executor** node.
 
@@ -315,13 +316,15 @@ def assemble_execution_prompt(
         engine: Token counter.
         tool_result: Result from the most recent tool call, if any.
         reserved_for_generation: Tokens reserved for generation.
+        available_tools: Explicit tools for this step. ``None`` uses every
+            registered tool; an empty list produces a tool-free prompt.
 
     Returns:
         A structurally valid, budget-compliant message list.
     """
     from agent_core.capability_registry import list_capabilities
 
-    tools = list_capabilities()
+    tools = list_capabilities() if available_tools is None else available_tools
     tools_section = _render_tools_section(tools) if tools else ""
 
     plan_steps: list[str] = state.get("plan_steps", [])
@@ -336,6 +339,7 @@ def assemble_execution_prompt(
         "execution_system.jinja2",
         current_step=current_step,
         tools_section=tools_section,
+        tool_free=available_tools is not None and not tools,
     )
 
     execution_log: list[dict] = state.get("execution_log", [])

@@ -32,7 +32,11 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
-def _build_react_input(state: "AgentState") -> dict:
+def _build_react_input(
+    state: "AgentState",
+    *,
+    tools: list | None = None,
+) -> dict:
     """Translate outer ``AgentState`` into the inner subgraph's input format.
 
     Calls ``assemble_execution_prompt`` to produce a fully assembled,
@@ -40,8 +44,61 @@ def _build_react_input(state: "AgentState") -> dict:
     in the ``{"messages": [...]}`` dict that the inner subgraph expects.
     """
     engine = get_engine()
-    messages = assemble_execution_prompt(state, engine)
+    messages = assemble_execution_prompt(
+        state,
+        engine,
+        available_tools=tools,
+    )
     return {"messages": messages}
+
+
+_CONVERSATION_ONLY_MARKERS = (
+    "记住",
+    "回忆",
+    "上一轮",
+    "此前对话",
+    "此前告诉",
+    "复述",
+    "直接回答",
+    "不要再次调用工具",
+    "无需工具",
+)
+
+
+def _is_tool_free_conversation_step(current_step: str) -> bool:
+    """Recognize explicit conversation-memory work that needs no capability.
+
+    This is intentionally conservative.  General unnamed steps still go
+    through ReAct so the model can select a tool; only direct memory/recall
+    instructions are isolated from the tool schemas.
+    """
+    from agent_core.capability_registry import list_capabilities
+
+    if any(cap.name in current_step for cap in list_capabilities()):
+        return False
+    return any(marker in current_step for marker in _CONVERSATION_ONLY_MARKERS)
+
+
+def _run_tool_free_step(
+    state: "AgentState",
+    current_step: str,
+) -> list[dict]:
+    """Execute a known conversation-only step without binding any tools."""
+    messages = _build_react_input(state, tools=[])["messages"]
+    response = get_engine().invoke(messages)
+    content = str(response.content or "").strip()
+    records = (
+        [{"step": current_step, "result": content, "tool_used": None}]
+        if content
+        else _recover_empty_response(messages, current_step)
+    )
+    if not records:
+        raise ExecutionError(
+            f"Step '{current_step}' produced no final response after one "
+            "tool-free recovery attempt."
+        )
+    _validate_required_tool_execution(current_step, records)
+    return records
 
 
 def _normalize_output_messages(raw_messages: list) -> list[BaseMessage]:
@@ -181,9 +238,11 @@ def _validate_required_tool_execution(
         )
     ]
     if pseudo_calls and not used_tools:
+        preview = re.sub(r"\s+", " ", plain_text).strip()[:240]
         raise ExecutionError(
             f"Step '{current_step}' returned textual pseudo tool call(s) "
-            f"{pseudo_calls} instead of structured tool_calls; no tool was executed."
+            f"{pseudo_calls} instead of structured tool_calls; no tool was "
+            f"executed. Response preview: {preview!r}"
         )
 
     if used_tools:
@@ -314,6 +373,15 @@ def executor_node(state: "AgentState", config: RunnableConfig) -> "AgentState":
         )
 
     current_step = plan_steps[current_step_index]
+
+    if _is_tool_free_conversation_step(current_step):
+        new_records = _run_tool_free_step(state, current_step)
+        state["execution_log"].extend(new_records)
+        state["current_step_index"] += 1
+        if state["current_step_index"] >= len(plan_steps):
+            state["status"] = "reflecting"
+        return state
+
     outer_thread_id = config["configurable"]["thread_id"]
 
     sub_config = {

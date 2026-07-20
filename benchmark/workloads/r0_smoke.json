@@ -21,6 +21,8 @@
       ],
       "expected_status": "done",
       "expected_contains": ["AgentMem"],
+      "min_tool_calls": 0,
+      "max_tool_calls": 0,
       "forbidden_tools": [
         "execute_shell_command",
         "count_lines"

@@ -288,6 +288,19 @@ class TestAssembleExecutionPrompt:
         assert isinstance(msgs[0], SystemMessage)
         assert "step one" in msgs[0].content
 
+    def test_explicit_empty_tool_list_creates_tool_free_prompt(
+        self, engine, empty_state
+    ):
+        _register_test_tool()
+        empty_state["plan_steps"] = ["记住项目代号"]
+        msgs = assemble_execution_prompt(
+            empty_state,
+            engine,
+            available_tools=[],
+        )
+        assert "不允许调用任何工具" in msgs[0].content
+        assert "test_search" not in msgs[0].content
+
     def test_execution_log_converted_to_messages(self, engine, empty_state):
         empty_state["task_goal"] = "test"
         empty_state["plan_steps"] = ["do it"]
