@@ -122,3 +122,4 @@ llm-env/
 
 *.sqlite
 data/
+benchmark/results/
