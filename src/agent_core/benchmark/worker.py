@@ -165,6 +165,7 @@ def main(argv: list[str] | None = None) -> int:
                 result, turn_results, failed_turn_index = _run_conversation_case(
                     manager, case.turns
                 )
+                result["turn_results"] = turn_results
             else:
                 _, result = runner.start_new_task(case.goal)
         duration_ms = (monotonic_ns() - started) / 1_000_000

@@ -24,6 +24,21 @@ def evaluate(case: BenchmarkCase, result: dict[str, Any]) -> dict[str, Any]:
         for record in result.get("execution_log", [])
         if record.get("tool_used")
     )
+    turn_results = list(result.get("turn_results", []))
+    per_turn_limits_ok = True
+    if case.max_tool_calls_per_turn:
+        per_turn_limits_ok = len(turn_results) >= len(
+            case.max_tool_calls_per_turn
+        ) and all(
+            limit is None
+            or sum(
+                1
+                for record in turn_results[index].get("execution_log", [])
+                if record.get("tool_used")
+            )
+            <= limit
+            for index, limit in enumerate(case.max_tool_calls_per_turn)
+        )
     checks = {
         "status": result.get("status") == case.expected_status,
         "answer_contains": all(
@@ -45,6 +60,7 @@ def evaluate(case: BenchmarkCase, result: dict[str, Any]) -> dict[str, Any]:
             if case.max_tool_calls is not None
             else True
         ),
+        "max_tool_calls_per_turn": per_turn_limits_ok,
         "final_answer_nonempty": (
             bool(final_answer.strip()) if case.expected_status == "done" else True
         ),

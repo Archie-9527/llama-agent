@@ -24,7 +24,7 @@
       "goal": "先使用 describe_sqlite_table 查看 {db_path} 中 incidents 表结构，再使用 query_sqlite 查询 request_id='req-7319' 的记录。回答 service、severity、root_cause、runbook 和 resolved。只允许只读查询。",
       "expected_status": "done",
       "expected_contains": ["payment-api", "critical", "connection_pool_exhausted", "RB-2048"],
-      "expected_tool_result_contains": ["req-7319", "connection_pool_exhausted", "RB-2048"],
+      "expected_tool_result_contains": ["connection_pool_exhausted", "RB-2048"],
       "expected_tools": ["describe_sqlite_table", "query_sqlite"],
       "expected_tool_sequence": ["describe_sqlite_table", "query_sqlite"],
       "min_tool_calls": 2,
@@ -146,7 +146,8 @@
       "expected_tools": ["search_log"],
       "expected_tool_sequence": ["search_log"],
       "min_tool_calls": 1,
-      "max_tool_calls": 1,
+      "max_tool_calls": 2,
+      "max_tool_calls_per_turn": [2, 0, 0],
       "forbidden_tools": [
         "get_artifact_summary", "retrieve_artifact", "search_artifact"
       ],

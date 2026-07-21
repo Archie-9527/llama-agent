@@ -24,6 +24,7 @@ class BenchmarkCase:
     forbidden_tools: tuple[str, ...] = ()
     min_tool_calls: int = 0
     max_tool_calls: int | None = None
+    max_tool_calls_per_turn: tuple[int | None, ...] = ()
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -58,6 +59,10 @@ class BenchmarkCase:
                 if raw.get("max_tool_calls") is not None
                 else None
             ),
+            max_tool_calls_per_turn=tuple(
+                int(item) if item is not None else None
+                for item in raw.get("max_tool_calls_per_turn", [])
+            ),
             metadata=dict(raw.get("metadata", {})),
         )
 
@@ -79,6 +84,7 @@ class BenchmarkCase:
             "forbidden_tools": list(self.forbidden_tools),
             "min_tool_calls": self.min_tool_calls,
             "max_tool_calls": self.max_tool_calls,
+            "max_tool_calls_per_turn": list(self.max_tool_calls_per_turn),
             "metadata": self.metadata,
         }
 
@@ -114,5 +120,12 @@ class BenchmarkSuite:
             ):
                 raise ValueError(
                     f"{case.case_id}: max_tool_calls must be >= min_tool_calls"
+                )
+            if any(
+                limit is not None and limit < 0
+                for limit in case.max_tool_calls_per_turn
+            ):
+                raise ValueError(
+                    f"{case.case_id}: per-turn tool limits must be >= 0"
                 )
         return suite

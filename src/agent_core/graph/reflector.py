@@ -15,10 +15,11 @@ decision, keeping the "how to route" logic in a single file.
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 from agent_core.exceptions import ReflectionError
-from agent_core.grammar_builder import build_enum_grammar
+from agent_core.grammar_builder import build_json_grammar
 from agent_core.llm_engine import get_engine
 from agent_core.prompt_assembler import assemble_reflection_prompt
 
@@ -31,6 +32,21 @@ if TYPE_CHECKING:
 
 _VALID_DECISIONS = {"done", "continue", "failed"}
 
+REFLECTION_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "decision": {
+            "type": "string",
+            "enum": sorted(_VALID_DECISIONS),
+        },
+        "reason": {
+            "type": "string",
+            "description": "Concrete evidence for the decision and retry advice.",
+        },
+    },
+    "required": ["decision", "reason"],
+}
+
 
 # ---------------------------------------------------------------------------
 # [STABLE] reflector_node
@@ -42,9 +58,9 @@ def reflector_node(state: "AgentState") -> "AgentState":
 
     Steps:
         1. Assemble the reflection prompt (task goal + plan + execution log).
-        2. Build an enum grammar that restricts output to exactly one of
-           ``done`` / ``continue`` / ``failed``.
-        3. Invoke the engine with the grammar and extract the decision.
+        2. Build a JSON grammar containing ``decision`` and diagnostic
+           ``reason`` fields.
+        3. Invoke the engine and extract the structured decision.
         4. Append a note to ``reflection_notes``, increment
            ``current_iteration``, and set ``status`` to the decision.
 
@@ -61,10 +77,21 @@ def reflector_node(state: "AgentState") -> "AgentState":
     """
     engine = get_engine()
     messages = assemble_reflection_prompt(state, engine)
-    grammar = build_enum_grammar(list(_VALID_DECISIONS))
+    grammar = build_json_grammar(REFLECTION_SCHEMA)
 
     response = engine.invoke(messages, grammar=grammar)
-    decision = response.content.strip().strip('"').strip("'")
+    raw = str(response.content).strip()
+    reason = ""
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = raw.strip('"').strip("'")
+    if isinstance(parsed, dict):
+        decision = str(parsed.get("decision", "")).strip()
+        reason = str(parsed.get("reason", "")).strip()
+    else:
+        # Backward compatibility for old checkpoints and lightweight tests.
+        decision = str(parsed).strip()
 
     if decision not in _VALID_DECISIONS:
         raise ReflectionError(
@@ -75,6 +102,8 @@ def reflector_node(state: "AgentState") -> "AgentState":
     # Record the decision
     current_iteration: int = state.get("current_iteration", 0)
     note = f"[iteration {current_iteration}] decision={decision}"
+    if reason:
+        note += f" reason={reason}"
     reflection_notes: list[str] = state.get("reflection_notes", [])
     reflection_notes.append(note)
 

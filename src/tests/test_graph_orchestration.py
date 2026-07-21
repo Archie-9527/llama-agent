@@ -704,6 +704,28 @@ class TestReflector:
 
         assert result["status"] == "continue"
 
+    def test_reflector_structured_reason_is_forwarded_to_planner(self, base_state):
+        mock_engine = MagicMock()
+        mock_engine.invoke.return_value = AIMessage(
+            content=json.dumps(
+                {
+                    "decision": "continue",
+                    "reason": "SELECT used an invalid relative database path",
+                }
+            )
+        )
+
+        with patch(
+            "agent_core.graph.reflector.get_engine", return_value=mock_engine
+        ), patch(
+            "agent_core.graph.reflector.assemble_reflection_prompt",
+            return_value=[SystemMessage(content="test")],
+        ):
+            result = reflector_node(base_state)
+
+        assert result["status"] == "continue"
+        assert "invalid relative database path" in result["reflection_notes"][-1]
+
     def test_reflector_invalid_decision_raises(self, base_state):
         """A9: Any decision outside {done, continue, failed} → ReflectionError."""
         base_state["task_goal"] = "test"

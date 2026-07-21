@@ -234,6 +234,42 @@ def test_evaluator_checks_tool_order_and_count():
     assert evaluate(case, reversed_result)["checks"]["tool_sequence"] is False
 
 
+def test_evaluator_enforces_tool_limits_per_conversation_turn():
+    case = BenchmarkCase(
+        case_id="turn-tools",
+        category="conversation",
+        expected_contains=("req-7319",),
+        max_tool_calls=2,
+        max_tool_calls_per_turn=(2, 0, 0),
+    )
+    result = {
+        "status": "done",
+        "final_answer": "req-7319",
+        "execution_log": [
+            {"tool_used": "search_log"},
+            {"tool_used": "get_log_window"},
+        ],
+        "turn_results": [
+            {
+                "execution_log": [
+                    {"tool_used": "search_log"},
+                    {"tool_used": "get_log_window"},
+                ]
+            },
+            {"execution_log": []},
+            {"execution_log": []},
+        ],
+    }
+    assert evaluate(case, result)["passed"] is True
+
+    result["turn_results"][2]["execution_log"] = [
+        {"tool_used": "search_log"}
+    ]
+    assert (
+        evaluate(case, result)["checks"]["max_tool_calls_per_turn"] is False
+    )
+
+
 def test_prepare_case_builds_deterministic_local_evidence(tmp_path: Path):
     case = BenchmarkCase(
         case_id="fixture",

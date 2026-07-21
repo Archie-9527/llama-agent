@@ -114,6 +114,61 @@ def _render_tools_section(tools: list[Capability]) -> str:
     return "\n".join(lines)
 
 
+def _compact_record_text(value: object, max_chars: int) -> str:
+    text = str(value or "")
+    if len(text) <= max_chars:
+        return text
+    head = max_chars // 2
+    tail = max_chars - head
+    return (
+        text[:head]
+        + "\n...[execution record compacted; head and tail preserved]...\n"
+        + text[-tail:]
+    )
+
+
+def _project_execution_log(
+    execution_log: list[dict],
+    engine: TokenCounter,
+    *,
+    token_budget: int,
+) -> list[dict]:
+    """Build a bounded, evidence-preserving view for model-facing prompts.
+
+    Full records remain in AgentState/checkpoints/telemetry.  Planner,
+    Reflector and Finalizer receive this projection so one large tool payload
+    cannot consume their entire protected SystemMessage.
+    """
+    records = [dict(record) for record in execution_log[-32:]]
+    max_chars = 4096
+    while True:
+        projected = [
+            {
+                "step": _compact_record_text(record.get("step", ""), 1024),
+                "result": _compact_record_text(
+                    record.get("result", ""), max_chars
+                ),
+                "tool_used": record.get("tool_used"),
+                **(
+                    {"tool_args": record.get("tool_args")}
+                    if record.get("tool_args")
+                    else {}
+                ),
+            }
+            for record in records
+        ]
+        serialized = json.dumps(projected, ensure_ascii=False, default=str)
+        if engine.get_num_tokens(serialized) <= token_budget:
+            return projected
+        if max_chars > 256:
+            max_chars //= 2
+            continue
+        if len(records) > 1:
+            records.pop(0)
+            continue
+        return projected
+
+
 # ---------------------------------------------------------------------------
 # [INTERNAL] History construction — AgentState → BaseMessage
 # ---------------------------------------------------------------------------
@@ -268,18 +323,28 @@ def assemble_planning_prompt(
 
     task_goal = state.get("task_goal", "")
     plan_steps = state.get("plan_steps", [])
+    reflection_notes: list[str] = state.get("reflection_notes", [])
+    prior_execution_log = (
+        _project_execution_log(
+            state.get("execution_log", []),
+            engine,
+            token_budget=max(512, _context_window(state, engine) // 4),
+        )
+        if reflection_notes
+        else []
+    )
 
     sys_msg = _render_system_prompt(
         "planning_system.jinja2",
         task_goal=task_goal,
         tools_section=tools_section,
         plan_steps=plan_steps,
+        execution_log=prior_execution_log,
     )
 
     messages: list[BaseMessage] = [sys_msg]
 
     # Append reflection notes from previous cycle (if any)
-    reflection_notes: list[str] = state.get("reflection_notes", [])
     if reflection_notes:
         notes_text = "以下是上一轮的评估反馈：\n" + "\n".join(
             f"- {note}" for note in reflection_notes
@@ -337,12 +402,17 @@ def assemble_execution_prompt(
 
     sys_msg = _render_system_prompt(
         "execution_system.jinja2",
+        task_goal=state.get("task_goal", ""),
         current_step=current_step,
         tools_section=tools_section,
         tool_free=available_tools is not None and not tools,
     )
 
-    execution_log: list[dict] = state.get("execution_log", [])
+    execution_log = _project_execution_log(
+        state.get("execution_log", []),
+        engine,
+        token_budget=max(1024, min(6000, _context_window(state, engine) // 3)),
+    )
     history_msgs = _build_history_messages(execution_log)
 
     # Always end the initial input with the current step as a HumanMessage.
@@ -406,7 +476,11 @@ def assemble_reflection_prompt(
     """
     task_goal = state.get("task_goal", "")
     plan_steps: list[str] = state.get("plan_steps", [])
-    execution_log: list[dict] = state.get("execution_log", [])
+    execution_log = _project_execution_log(
+        state.get("execution_log", []),
+        engine,
+        token_budget=max(1024, min(6000, _context_window(state, engine) // 3)),
+    )
 
     sys_msg = _render_system_prompt(
         "reflection_system.jinja2",
@@ -433,7 +507,14 @@ def assemble_finalization_prompt(
         "finalization_system.jinja2",
         task_goal=state.get("task_goal", ""),
         plan_steps=state.get("plan_steps", []),
-        execution_log=state.get("execution_log", []),
+        execution_log=_project_execution_log(
+            state.get("execution_log", []),
+            engine,
+            token_budget=max(
+                1024,
+                min(6000, _context_window(state, engine) // 3),
+            ),
+        ),
     )
     raw: list[BaseMessage] = [sys_msg]
     _validate_message_sequence(raw)

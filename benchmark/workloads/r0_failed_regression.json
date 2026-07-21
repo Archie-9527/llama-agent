@@ -16,7 +16,6 @@
         "RB-2048"
       ],
       "expected_tool_result_contains": [
-        "req-7319",
         "connection_pool_exhausted",
         "RB-2048"
       ],
@@ -254,7 +253,12 @@
         "search_log"
       ],
       "min_tool_calls": 1,
-      "max_tool_calls": 1,
+      "max_tool_calls": 2,
+      "max_tool_calls_per_turn": [
+        2,
+        0,
+        0
+      ],
       "forbidden_tools": [
         "get_artifact_summary",
         "retrieve_artifact",

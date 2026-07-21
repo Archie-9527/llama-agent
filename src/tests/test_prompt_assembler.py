@@ -44,6 +44,7 @@ from agent_core.prompt_assembler import (
     _render_tools_section,
     _validate_message_sequence,
     assemble_execution_prompt,
+    assemble_finalization_prompt,
     assemble_planning_prompt,
     assemble_reflection_prompt,
 )
@@ -370,6 +371,33 @@ class TestAssembleReflectionPrompt:
         # Our template doesn't inject tools → verify
         assert "test_search" not in content
 
+    def test_large_tool_result_is_bounded_but_tail_evidence_survives(
+        self, engine, empty_state
+    ):
+        raw_result = "HEAD" + ("x" * 60_000) + "FINAL_EVIDENCE=req-7319"
+        empty_state["task_goal"] = "find final evidence"
+        empty_state["plan_steps"] = ["read a large file"]
+        empty_state["execution_log"] = [
+            {
+                "step": "read a large file",
+                "result": raw_result,
+                "tool_used": "read_file",
+            },
+            {
+                "step": "summarize",
+                "result": "FINAL_EVIDENCE=req-7319",
+                "tool_used": None,
+            },
+        ]
+
+        reflected = assemble_reflection_prompt(empty_state, engine)
+        finalized = assemble_finalization_prompt(empty_state, engine)
+
+        assert "FINAL_EVIDENCE=req-7319" in reflected[0].content
+        assert "FINAL_EVIDENCE=req-7319" in finalized[0].content
+        assert len(reflected[0].content) < len(raw_result)
+        assert empty_state["execution_log"][0]["result"] == raw_result
+
 
 # ============================================================================
 # ④ Consistency & determinism
@@ -481,6 +509,27 @@ class TestIntegration:
         msgs = assemble_execution_prompt(empty_state, engine)
         _validate_message_sequence(msgs)
         assert "search" in msgs[0].content
+        assert "Complete task" in msgs[0].content
+
+    def test_replanning_prompt_contains_failure_evidence(self, engine, empty_state):
+        empty_state["task_goal"] = "query /absolute/incidents.sqlite"
+        empty_state["plan_steps"] = ["query incidents.sqlite"]
+        empty_state["reflection_notes"] = [
+            "decision=continue reason=path does not exist"
+        ]
+        empty_state["execution_log"] = [
+            {
+                "step": "query incidents.sqlite",
+                "result": "ValueError: path does not exist",
+                "tool_used": "query_sqlite",
+                "tool_args": {"db_path": "incidents.sqlite"},
+            }
+        ]
+
+        msgs = assemble_planning_prompt(empty_state, engine)
+        combined = "\n".join(str(msg.content) for msg in msgs)
+        assert "path does not exist" in combined
+        assert "/absolute/incidents.sqlite" in combined
 
     def test_full_pipeline_reflection(self, engine, empty_state):
         empty_state["task_goal"] = "Write report"
