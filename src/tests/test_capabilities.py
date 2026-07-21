@@ -372,6 +372,13 @@ class TestSqliteProvider:
                 db_path=str(db), query="SELECT * FROM incidents"
             )
         )
+        selected_with_null_limit = json.loads(
+            capabilities["query_sqlite"].handler(
+                db_path=str(db),
+                query="SELECT * FROM incidents",
+                max_rows=None,
+            )
+        )
         rejected = json.loads(
             capabilities["query_sqlite"].handler(
                 db_path=str(db), query="DELETE FROM incidents"
@@ -379,6 +386,7 @@ class TestSqliteProvider:
         )
         assert [item["name"] for item in described["columns"]] == ["id", "code"]
         assert selected["rows"][0]["id"] == "req-1"
+        assert selected_with_null_limit["rows"][0]["id"] == "req-1"
         assert rejected["success"] is False
         with sqlite3.connect(db) as connection:
             assert connection.execute("SELECT count(*) FROM incidents").fetchone()[0] == 1

@@ -74,9 +74,11 @@ class ArtifactCapabilityProvider(CapabilityProvider):
 
         def _retrieve(
             artifact_id: str,
-            offset: int = 0,
-            length: int = 4096,
+            offset: int | None = 0,
+            length: int | None = 4096,
         ) -> dict:
+            offset = 0 if offset is None else offset
+            length = 4096 if length is None else length
             return {
                 "success": True,
                 **store.retrieve(
@@ -90,8 +92,9 @@ class ArtifactCapabilityProvider(CapabilityProvider):
         def _search(
             artifact_id: str,
             query: str,
-            max_matches: int = 5,
+            max_matches: int | None = 5,
         ) -> dict:
+            max_matches = 5 if max_matches is None else max_matches
             return {
                 "success": True,
                 **store.search(

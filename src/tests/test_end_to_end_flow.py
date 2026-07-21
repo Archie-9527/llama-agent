@@ -25,6 +25,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 
 from agent_core.session import RunConfig, TaskRunner
 from agent_core.exceptions import AgentCoreError
+from agent_core.capability_registry import clear_registry, register
 
 
 # ---------------------------------------------------------------------------
@@ -98,16 +99,31 @@ def patched_env(monkeypatch):
     把推理内核层和内层子图两个边界点替换为可控Fake。
     ⚠️ 下面的patch路径需对照实际import写法调整，见文档正文说明。
     """
-    fake_engine = FakeEngine(plan_steps=["查询目标信息", "生成最终结论"])
+    clear_registry()
+
+    @register(
+        name="fake_tool",
+        description="A deterministic integration-test tool",
+        input_schema={"type": "object", "properties": {}},
+    )
+    def fake_tool():
+        return "工具返回的结果数据"
+
+    plan_steps = ["使用 fake_tool 查询目标信息", "使用 fake_tool 生成最终结论"]
+    fake_engine = FakeEngine(plan_steps=plan_steps)
     fake_react_agent = FakeReactAgent()
 
     monkeypatch.setattr("agent_core.graph.planner.get_engine", lambda: fake_engine)
     monkeypatch.setattr("agent_core.graph.reflector.get_engine", lambda: fake_engine)
     monkeypatch.setattr("agent_core.graph.executor.get_engine", lambda: fake_engine)
     monkeypatch.setattr("agent_core.graph.finalizer.get_engine", lambda: fake_engine)
-    monkeypatch.setattr("agent_core.graph.react_agent_factory.initialize_react_agent", lambda: fake_react_agent)
+    monkeypatch.setattr(
+        "agent_core.graph.react_agent_factory.initialize_react_agent",
+        lambda tool_names=None: fake_react_agent,
+    )
 
-    return fake_engine, fake_react_agent
+    yield fake_engine, fake_react_agent
+    clear_registry()
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +139,10 @@ def test_full_flow_happy_path(tmp_config, patched_env):
     thread_id, result = runner.start_new_task("查一下今天的新闻并总结")
 
     assert result["status"] == "done"
-    assert result["plan_steps"] == ["查询目标信息", "生成最终结论"]
+    assert result["plan_steps"] == [
+        "使用 fake_tool 查询目标信息",
+        "使用 fake_tool 生成最终结论",
+    ]
     assert result["current_step_index"] == 2
 
     # 每个计划步骤 = 1次工具调用记录 + 1次最终结论记录，2步骤共4条

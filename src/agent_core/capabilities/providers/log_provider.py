@@ -90,13 +90,14 @@ class LogCapabilityProvider(CapabilityProvider):
         def _search(
             log_path: str,
             query: str,
-            max_matches: int = 20,
+            max_matches: int | None = 20,
         ) -> str:
             try:
                 if not query:
                     raise ValueError("query must not be empty")
                 path, lines = _lines(log_path)
-                limit = max(1, min(max_matches, config.max_matches))
+                requested_matches = 20 if max_matches is None else max_matches
+                limit = max(1, min(requested_matches, config.max_matches))
                 matches = [
                     {"line_number": number, "line": line}
                     for number, line in enumerate(lines, start=1)
@@ -118,13 +119,15 @@ class LogCapabilityProvider(CapabilityProvider):
         def _window(
             log_path: str,
             line_number: int,
-            before: int = 2,
-            after: int = 2,
+            before: int | None = 2,
+            after: int | None = 2,
         ) -> str:
             try:
                 path, lines = _lines(log_path)
                 if line_number < 1 or line_number > len(lines):
                     raise ValueError("line_number is outside the log")
+                before = 2 if before is None else before
+                after = 2 if after is None else after
                 before = max(0, before)
                 after = max(0, after)
                 if before + after + 1 > config.max_window_lines:

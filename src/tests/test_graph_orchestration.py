@@ -49,10 +49,12 @@ from agent_core.graph.executor import (
     _is_tool_free_conversation_step,
     _normalize_output_messages,
     _recover_empty_response,
+    _required_tool_names_for_step,
     _validate_required_tool_execution,
     executor_node,
 )
 from agent_core.graph.reflector import reflector_node
+from agent_core.graph.finalizer import finalizer_node
 from agent_core.graph.build_graph import (
     _route_after_executor,
     _route_after_reflector,
@@ -60,6 +62,7 @@ from agent_core.graph.build_graph import (
 )
 from agent_core.graph.react_agent_factory import (
     USE_OFFICIAL_CREATE_AGENT,
+    _compact_tool_messages_for_model,
     _build_via_self_made_stategraph,
     _build_via_create_agent,
     _ReActState,
@@ -158,6 +161,43 @@ class TestPlannerNormalOutput:
         assert result["status"] == "executing"
 
 
+class TestFinalizerFallback:
+    def test_truncated_finalizer_uses_complete_executor_summaries(self, base_state):
+        base_state["task_goal"] = "分析日志"
+        base_state["plan_steps"] = ["搜索日志", "整理结果"]
+        base_state["execution_log"] = [
+            {
+                "step": "搜索日志",
+                "result": "真实工具原始结果",
+                "tool_used": "search_log",
+            },
+            {
+                "step": "搜索日志",
+                "result": "request_id=req-7319，root_cause=connection_pool_exhausted",
+                "tool_used": None,
+            },
+        ]
+        response = AIMessage(
+            content="根据日志路径 /tmp/trunca",
+            response_metadata={"finish_reason": "length"},
+        )
+        mock_engine = MagicMock()
+        mock_engine.invoke.return_value = response
+
+        with patch(
+            "agent_core.graph.finalizer.get_engine", return_value=mock_engine
+        ), patch(
+            "agent_core.graph.finalizer.assemble_finalization_prompt",
+            return_value=[SystemMessage(content="finalize")],
+        ):
+            result = finalizer_node(base_state)
+
+        assert result["status"] == "done"
+        assert result["final_answer"] == (
+            "request_id=req-7319，root_cause=connection_pool_exhausted"
+        )
+
+
 # ── Acceptance A2: Planner exception translation ─────────────────────────────
 
 
@@ -250,6 +290,30 @@ class TestExecutorStateBridging:
         assert records[0]["result"] == "The answer is 42."
         assert records[0]["step"] == "think step"
 
+    def test_large_tool_result_is_compacted_for_model_with_tail_preserved(self):
+        engine = MagicMock()
+        engine.n_ctx = 2000
+        engine.max_tokens = 256
+        engine.get_num_tokens.side_effect = lambda text: len(str(text)) // 2
+        original_content = "HEAD" + ("x" * 6000) + "FINAL_EVIDENCE"
+        original = ToolMessage(content=original_content, tool_call_id="call-1")
+
+        compacted = _compact_tool_messages_for_model(
+            [
+                SystemMessage(content="system"),
+                original,
+                HumanMessage(content="summarize"),
+            ],
+            engine,
+        )
+
+        assert compacted[1].content != original_content
+        assert str(compacted[1].content).startswith("HEAD")
+        assert str(compacted[1].content).endswith("FINAL_EVIDENCE")
+        assert "tool result compacted" in str(compacted[1].content)
+        # The original graph-state message remains untouched.
+        assert original.content == original_content
+
     def test_extract_execution_result_multiple_tools(self):
         """A4: AIMessage with 2 tool_calls → 2+ records, tool_used matches."""
         messages = [
@@ -303,6 +367,36 @@ class TestExecutorStateBridging:
             _validate_required_tool_execution(
                 "Use execute_shell_command to inspect src", records
             )
+
+    def test_prior_tool_reference_is_not_required_again(self):
+        @register(
+            name="search_log",
+            description="Search logs",
+            input_schema={"type": "object", "properties": {}},
+        )
+        def search_log():
+            return "unused"
+
+        @register(
+            name="get_log_window",
+            description="Read a log window",
+            input_schema={"type": "object", "properties": {}},
+        )
+        def get_log_window():
+            return "unused"
+
+        step = (
+            "使用 get_log_window 工具读取命中行前后内容，"
+            "line_number 为 search_log 返回的行号。"
+        )
+        assert _required_tool_names_for_step(step) == ("get_log_window",)
+        _validate_required_tool_execution(
+            step,
+            [
+                {"step": step, "result": "window", "tool_used": "get_log_window"},
+                {"step": step, "result": "读取完成", "tool_used": None},
+            ],
+        )
 
     def test_protocol_marker_is_replaced_by_recovery_summary(self):
         records = [
@@ -426,17 +520,17 @@ class TestExecutorNode:
         base_state["plan_steps"] = ["Say hello"]
         base_state["current_step_index"] = 0
 
-        # Mock the inner agent to return a plain text response
-        mock_agent = MagicMock()
-        mock_agent.invoke.return_value = {
-            "messages": [AIMessage(content="Hello!")]
-        }
+        mock_engine = MagicMock()
+        mock_engine.n_ctx = 4096
+        mock_engine.get_num_tokens.side_effect = lambda text: len(str(text))
+        mock_engine.invoke.return_value = AIMessage(content="Hello!")
 
         # Build a mock config with the thread_id that executor_node expects
         mock_config = {"configurable": {"thread_id": "test-thread"}}
 
-        with patch("agent_core.graph.executor._build_react_input", return_value={"messages": []}), \
-             patch("agent_core.graph.react_agent_factory.initialize_react_agent", return_value=mock_agent):
+        with patch(
+            "agent_core.graph.executor.get_engine", return_value=mock_engine
+        ):
             result = executor_node(base_state, config=mock_config)  # type: ignore[call-arg]
 
         assert len(result["execution_log"]) == 1
@@ -480,7 +574,7 @@ class TestExecutorNode:
         assert "不允许调用任何工具" in messages[0].content
         assert "execute_shell_command" not in messages[0].content
 
-    def test_tool_named_memory_step_is_not_classified_tool_free(self):
+    def test_prior_tool_named_memory_step_is_classified_tool_free(self):
         @register(
             name="search_log",
             description="Search logs",
@@ -489,19 +583,40 @@ class TestExecutorNode:
         def search_log():
             return "unused"
 
-        assert _is_tool_free_conversation_step("记住 search_log 的结果") is False
+        assert _is_tool_free_conversation_step("记住 search_log 的结果") is True
+
+    def test_paraphrased_confirmation_step_is_classified_tool_free(self):
+        _register_test_tools()
+        assert _is_tool_free_conversation_step(
+            "确认用户已正确记录部署环境为 openEuler。"
+        ) is True
 
     def test_executor_multiple_steps_status_stays_executing(self, base_state):
         """A5: With 3 plan steps, executor stays at 'executing' until last step."""
         _register_test_tools()
         base_state["task_goal"] = "test"
-        base_state["plan_steps"] = ["step 1", "step 2", "step 3"]
+        base_state["plan_steps"] = [
+            "Use echo for step 1",
+            "Use echo for step 2",
+            "Use echo for step 3",
+        ]
         base_state["current_step_index"] = 0
 
         mock_agent = MagicMock()
         mock_agent.invoke.return_value = {
             "messages": [
                 SystemMessage(content="test"),
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        ToolCall(
+                            name="echo",
+                            args={"message": "step"},
+                            id="call-step",
+                        )
+                    ],
+                ),
+                ToolMessage(content="echo: step", tool_call_id="call-step"),
                 AIMessage(content="Done."),
             ]
         }
@@ -529,7 +644,7 @@ class TestExecutorNode:
         """A6: recursion limit exceeded → ExecutionError."""
         _register_test_tools()
         base_state["task_goal"] = "test"
-        base_state["plan_steps"] = ["step that loops forever"]
+        base_state["plan_steps"] = ["Use echo in a step that loops forever"]
 
         mock_agent = MagicMock()
         mock_agent.invoke.side_effect = Exception("GraphRecursionError: recursion limit")

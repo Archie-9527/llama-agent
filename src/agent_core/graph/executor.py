@@ -52,31 +52,47 @@ def _build_react_input(
     return {"messages": messages}
 
 
-_CONVERSATION_ONLY_MARKERS = (
-    "记住",
-    "回忆",
-    "上一轮",
-    "此前对话",
-    "此前告诉",
-    "复述",
-    "直接回答",
-    "不要再次调用工具",
-    "无需工具",
-)
+def _required_tool_names_for_step(current_step: str) -> tuple[str, ...]:
+    """Return the tool explicitly targeted by one atomic plan step.
 
-
-def _is_tool_free_conversation_step(current_step: str) -> bool:
-    """Recognize explicit conversation-memory work that needs no capability.
-
-    This is intentionally conservative.  General unnamed steps still go
-    through ReAct so the model can select a tool; only direct memory/recall
-    instructions are isolated from the tool schemas.
+    The planner contract requires every tool-using step to name its tool and
+    to keep steps atomic.  A tool name mentioned only as prior evidence (for
+    example, ``line_number 为 search_log 返回的行号``) must not become another
+    required call.  Prefer an imperative ``使用/调用/use/call <tool>`` target;
+    as a compatibility fallback, accept a tool name at the start of a step.
     """
     from agent_core.capability_registry import list_capabilities
 
-    if any(cap.name in current_step for cap in list_capabilities()):
-        return False
-    return any(marker in current_step for marker in _CONVERSATION_ONLY_MARKERS)
+    names = {cap.name for cap in list_capabilities()}
+    if not names:
+        return ()
+
+    alternation = "|".join(
+        re.escape(name) for name in sorted(names, key=len, reverse=True)
+    )
+    imperative = re.search(
+        rf"(?:使用|调用|通过|use|call)\s*(?:工具\s*)?({alternation})\b",
+        current_step,
+        re.IGNORECASE,
+    )
+    if imperative:
+        matched = imperative.group(1)
+        return (next(name for name in names if name.casefold() == matched.casefold()),)
+
+    leading = re.search(
+        rf"^\s*(?:\d+[.、)]\s*)?({alternation})\b",
+        current_step,
+        re.IGNORECASE,
+    )
+    if leading:
+        matched = leading.group(1)
+        return (next(name for name in names if name.casefold() == matched.casefold()),)
+    return ()
+
+
+def _is_tool_free_conversation_step(current_step: str) -> bool:
+    """Return true when the atomic plan step declares no target tool."""
+    return not _required_tool_names_for_step(current_step)
 
 
 def _run_tool_free_step(
@@ -198,6 +214,7 @@ def _extract_execution_result(
 def _validate_required_tool_execution(
     current_step: str,
     records: list[dict],
+    required_tool_names: tuple[str, ...] | None = None,
 ) -> None:
     """Reject textual tool imitations that were never actually executed.
 
@@ -214,7 +231,11 @@ def _validate_required_tool_execution(
         record["tool_used"] for record in records if record.get("tool_used")
     }
 
-    required_by_step = [name for name in tool_names if name in current_step]
+    required_by_step = list(
+        _required_tool_names_for_step(current_step)
+        if required_tool_names is None
+        else required_tool_names
+    )
     missing = [name for name in required_by_step if name not in used_tools]
     if missing:
         raise ExecutionError(
@@ -374,7 +395,8 @@ def executor_node(state: "AgentState", config: RunnableConfig) -> "AgentState":
 
     current_step = plan_steps[current_step_index]
 
-    if _is_tool_free_conversation_step(current_step):
+    required_tool_names = _required_tool_names_for_step(current_step)
+    if not required_tool_names:
         new_records = _run_tool_free_step(state, current_step)
         state["execution_log"].extend(new_records)
         state["current_step_index"] += 1
@@ -391,8 +413,14 @@ def executor_node(state: "AgentState", config: RunnableConfig) -> "AgentState":
         "recursion_limit": 8
     }
 
-    # Build input for the inner subgraph
-    react_input = _build_react_input(state)
+    from agent_core.capability_registry import get_capability
+
+    step_tools = [get_capability(name) for name in required_tool_names]
+
+    # Expose only the current atomic step's target tool.  This both reduces
+    # prompt/schema overhead and prevents a small local model from selecting a
+    # semantically related but incorrect capability.
+    react_input = _build_react_input(state, tools=step_tools)
 
     # 记录输入消息的数量，以便我们稍后可以仅隔离由内部代理新生成的消息。
     # 内部子图可能会返回完整的对话历史记录（例如，当FakeReactAgent连接输入和输出时），
@@ -402,7 +430,7 @@ def executor_node(state: "AgentState", config: RunnableConfig) -> "AgentState":
     # Get the cached inner agent
     from agent_core.graph.react_agent_factory import initialize_react_agent
 
-    agent = initialize_react_agent()
+    agent = initialize_react_agent(required_tool_names)
 
     # Run the inner loop with a recursion-limit safety cap
     try:
@@ -437,7 +465,11 @@ def executor_node(state: "AgentState", config: RunnableConfig) -> "AgentState":
                 f"Step '{current_step}' produced no tool result or final response "
                 "after one tool-free recovery attempt."
             )
-    _validate_required_tool_execution(current_step, new_records)
+    _validate_required_tool_execution(
+        current_step,
+        new_records,
+        required_tool_names=required_tool_names,
+    )
 
     state["execution_log"].extend(new_records)
     state["current_step_index"] += 1

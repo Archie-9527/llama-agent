@@ -26,14 +26,25 @@ def finalizer_node(state: "AgentState") -> "AgentState":
     engine = get_engine()
     response = engine.invoke(assemble_finalization_prompt(state, engine))
     answer = str(response.content).strip()
-    if not answer or re.fullmatch(
-        r"functions\.[A-Za-z_][A-Za-z0-9_]*\s*:\s*", answer
-    ):
+    finish_reason = str(
+        getattr(response, "response_metadata", {}).get("finish_reason") or ""
+    ).casefold()
+    unusable = (
+        not answer
+        or finish_reason in {"length", "max_tokens"}
+        or bool(
+            re.fullmatch(
+                r"functions\.[A-Za-z_][A-Za-z0-9_]*\s*:\s*",
+                answer,
+            )
+        )
+    )
+    if unusable:
         if summaries:
             answer = "\n".join(summaries)
         else:
             raise ReflectionError(
-                "Finalizer produced an empty or protocol-only answer"
+                "Finalizer produced an empty, truncated or protocol-only answer"
             )
     state["final_answer"] = answer
     state["status"] = "done"

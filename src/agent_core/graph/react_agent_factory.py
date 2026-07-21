@@ -42,7 +42,14 @@ def _run_capability(cap: Capability, kwargs: dict) -> object:
     telemetry = get_telemetry()
     started = monotonic_ns()
     try:
-        result = cap.handler(**kwargs)
+        # LangChain/Pydantic materialises omitted optional schema properties as
+        # ``None``.  Dropping those values lets the provider's Python defaults
+        # apply and avoids turning an omitted limit/offset into a runtime type
+        # error (for example ``min(None, max_rows)``).
+        normalized_kwargs = {
+            key: value for key, value in kwargs.items() if value is not None
+        }
+        result = cap.handler(**normalized_kwargs)
     except Exception as exc:
         telemetry.record_event(
             "tool_events.jsonl",
@@ -72,6 +79,77 @@ USE_OFFICIAL_CREATE_AGENT = (
 )
 
 _AGENT_DEBUG = os.environ.get("AGENT_DEBUG", "false").lower() == "true"
+
+_TOOL_RESULT_COMPACTION_MARKER = (
+    "\n...[tool result compacted to fit the model context; "
+    "the beginning and end are preserved]...\n"
+)
+
+
+def _compact_tool_messages_for_model(
+    messages: list[BaseMessage],
+    engine,
+) -> list[BaseMessage]:
+    """Bound the latest tool result before the follow-up summary inference.
+
+    The complete ToolMessage remains in LangGraph state and telemetry; only the
+    model-facing copy is compacted.  Keeping both the head and tail is
+    important for file/log tools where final evidence commonly appears at EOF.
+    This is a hard context-safety guard, independent of R1 artifact
+    virtualization.
+    """
+    n_ctx = int(getattr(engine, "n_ctx", 8192))
+    max_tokens = int(getattr(engine, "max_tokens", 512))
+    budget = max(512, n_ctx - max_tokens - 512)
+
+    def total_tokens(items: list[BaseMessage]) -> int:
+        return sum(
+            engine.get_num_tokens(
+                item.content if isinstance(item.content, str) else str(item.content)
+            )
+            for item in items
+        )
+
+    copied = list(messages)
+    if total_tokens(copied) <= budget:
+        return copied
+
+    tool_index = next(
+        (
+            index
+            for index in range(len(copied) - 1, -1, -1)
+            if isinstance(copied[index], ToolMessage)
+        ),
+        None,
+    )
+    if tool_index is None:
+        return copied
+
+    original = copied[tool_index]
+    content = str(original.content or "")
+    low, high = 0, len(content)
+    best = _TOOL_RESULT_COMPACTION_MARKER
+    while low <= high:
+        retained = (low + high) // 2
+        head_size = (retained + 1) // 2
+        tail_size = retained // 2
+        compacted = (
+            content[:head_size]
+            + _TOOL_RESULT_COMPACTION_MARKER
+            + (content[-tail_size:] if tail_size else "")
+        )
+        candidate = list(copied)
+        candidate[tool_index] = original.model_copy(
+            update={"content": compacted}
+        )
+        if total_tokens(candidate) <= budget:
+            best = compacted
+            low = retained + 1
+        else:
+            high = retained - 1
+
+    copied[tool_index] = original.model_copy(update={"content": best})
+    return copied
 
 
 # ---------------------------------------------------------------------------
@@ -159,17 +237,19 @@ def _summarize_after_tool(request, handler):
     model to answer from that real result.
     """
     if request.messages and isinstance(request.messages[-1], ToolMessage):
+        summary_instruction = HumanMessage(
+            content=(
+                "工具已经执行完毕。请严格根据上面的真实工具结果，"
+                "用自然语言总结当前步骤的最终答案。不要再次调用工具，"
+                "不要输出 functions.<name>:、JSON 调用或调用说明。"
+            )
+        )
+        model_messages = _compact_tool_messages_for_model(
+            [*request.messages, summary_instruction],
+            get_engine(),
+        )
         summary_request = request.override(
-            messages=[
-                *request.messages,
-                HumanMessage(
-                    content=(
-                        "工具已经执行完毕。请严格根据上面的真实工具结果，"
-                        "用自然语言总结当前步骤的最终答案。不要再次调用工具，"
-                        "不要输出 functions.<name>:、JSON 调用或调用说明。"
-                    )
-                ),
-            ],
+            messages=model_messages,
             tools=[],
             tool_choice="none",
         )
@@ -177,7 +257,13 @@ def _summarize_after_tool(request, handler):
     return handler(request)
 
 
-def _build_via_create_agent():
+def _selected_capabilities(tool_names: tuple[str, ...] | None) -> list[Capability]:
+    if tool_names is None:
+        return list_capabilities()
+    return [get_capability(name) for name in tool_names]
+
+
+def _build_via_create_agent(tool_names: tuple[str, ...] | None = None):
     """Build the ReAct inner graph via ``langchain.agents.create_agent``.
 
     Design invariants:
@@ -187,7 +273,7 @@ def _build_via_create_agent():
           the outer-graph node boundary.
         * Tools come from ``list_capabilities()`` (single source of truth).
     """
-    tools = [to_langchain_tool(cap) for cap in list_capabilities()]
+    tools = [to_langchain_tool(cap) for cap in _selected_capabilities(tool_names)]
     engine = get_engine()
 
     return create_agent(
@@ -221,16 +307,17 @@ def _agent_node(state: _ReActState) -> dict:
     messages = state["messages"]
     engine = get_engine()
     if messages and isinstance(messages[-1], ToolMessage):
+        summary_instruction = HumanMessage(
+            content=(
+                "工具已经执行完毕。请严格根据真实工具结果总结当前步骤，"
+                "不要再次调用工具或输出工具协议标记。"
+            )
+        )
         response: AIMessage = engine.invoke(  # type: ignore[assignment]
-            [
-                *messages,
-                HumanMessage(
-                    content=(
-                        "工具已经执行完毕。请严格根据真实工具结果总结当前步骤，"
-                        "不要再次调用工具或输出工具协议标记。"
-                    )
-                ),
-            ]
+            _compact_tool_messages_for_model(
+                [*messages, summary_instruction],
+                engine,
+            )
         )
     else:
         tools = [to_langchain_tool(cap) for cap in list_capabilities()]
@@ -266,7 +353,9 @@ def _should_continue(state: _ReActState) -> str:
     return END
 
 
-def _build_via_self_made_stategraph():
+def _build_via_self_made_stategraph(
+    tool_names: tuple[str, ...] | None = None,
+):
     """Build the ReAct inner graph from raw StateGraph primitives.
 
     The resulting graph has the same ``.invoke({"messages": [...]})``
@@ -280,9 +369,51 @@ def _build_via_self_made_stategraph():
     Edges:
         entry → agent → (conditional) → tools → agent  …or…  → END
     """
+    allowed = _selected_capabilities(tool_names)
+    allowed_by_name = {cap.name: cap for cap in allowed}
+
+    def scoped_agent_node(state: _ReActState) -> dict:
+        messages = state["messages"]
+        engine = get_engine()
+        if messages and isinstance(messages[-1], ToolMessage):
+            summary_instruction = HumanMessage(
+                content=(
+                    "工具已经执行完毕。请严格根据真实工具结果总结当前步骤，"
+                    "不要再次调用工具或输出工具协议标记。"
+                )
+            )
+            response: AIMessage = engine.invoke(  # type: ignore[assignment]
+                _compact_tool_messages_for_model(
+                    [*messages, summary_instruction],
+                    engine,
+                )
+            )
+        else:
+            model_with_tools = engine.bind_tools(
+                [to_langchain_tool(cap) for cap in allowed]
+            )
+            response = model_with_tools.invoke(messages)  # type: ignore[assignment]
+        return {"messages": [response]}
+
+    def scoped_tool_node(state: _ReActState) -> dict:
+        last_message = state["messages"][-1]
+        if not isinstance(last_message, AIMessage) or not last_message.tool_calls:
+            return {"messages": []}
+        results: list[ToolMessage] = []
+        for call in last_message.tool_calls:
+            try:
+                capability = allowed_by_name[call["name"]]
+                result = _run_capability(capability, call["args"])
+            except Exception as exc:
+                result = f"Tool error: {exc}"
+            results.append(
+                ToolMessage(content=str(result), tool_call_id=call["id"])
+            )
+        return {"messages": results}
+
     graph = StateGraph(_ReActState)
-    graph.add_node("agent", _agent_node)
-    graph.add_node("tools", _tool_node)
+    graph.add_node("agent", scoped_agent_node)
+    graph.add_node("tools", scoped_tool_node)
     graph.set_entry_point("agent")
     graph.add_conditional_edges(
         "agent",
@@ -298,8 +429,8 @@ def _build_via_self_made_stategraph():
 # ---------------------------------------------------------------------------
 
 
-@lru_cache(maxsize=1)
-def initialize_react_agent():
+@lru_cache(maxsize=64)
+def initialize_react_agent(tool_names: tuple[str, ...] | None = None):
     """Build and cache the compiled ReAct inner subgraph.
 
     Must be called **after** ``bootstrap_capabilities()`` so that
@@ -313,8 +444,8 @@ def initialize_react_agent():
         * ``USE_OFFICIAL_CREATE_AGENT=false`` → hand-rolled StateGraph.
     """
     if USE_OFFICIAL_CREATE_AGENT:
-        return _build_via_create_agent()
-    return _build_via_self_made_stategraph()
+        return _build_via_create_agent(tool_names)
+    return _build_via_self_made_stategraph(tool_names)
 
 
 # Backward-compat alias — the V2/V3 naming transition.

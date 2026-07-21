@@ -63,8 +63,14 @@ class FileCapabilityProvider(CapabilityProvider):
             except (OSError, ValueError) as exc:
                 return _json_error(exc)
 
-        def _read(file_path: str, offset: int = 0, length: int = 4096) -> str:
+        def _read(
+            file_path: str,
+            offset: int | None = 0,
+            length: int | None = 4096,
+        ) -> str:
             try:
+                offset = 0 if offset is None else offset
+                length = 4096 if length is None else length
                 if offset < 0 or length < 1:
                     raise ValueError("offset must be >= 0 and length must be >= 1")
                 path = resolve_allowed_path(file_path, roots)
@@ -92,14 +98,15 @@ class FileCapabilityProvider(CapabilityProvider):
         def _search(
             file_path: str,
             query: str,
-            max_matches: int = 10,
+            max_matches: int | None = 10,
         ) -> str:
             try:
                 if not query:
                     raise ValueError("query must not be empty")
                 path = resolve_allowed_path(file_path, roots)
                 lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-                limit = max(1, min(max_matches, config.max_matches))
+                requested_matches = 10 if max_matches is None else max_matches
+                limit = max(1, min(requested_matches, config.max_matches))
                 matches = [
                     {"line_number": number, "line": line}
                     for number, line in enumerate(lines, start=1)

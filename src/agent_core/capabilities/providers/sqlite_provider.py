@@ -94,7 +94,11 @@ class SqliteCapabilityProvider(CapabilityProvider):
             except (sqlite3.Error, OSError, ValueError) as exc:
                 return _error(exc)
 
-        def _query(db_path: str, query: str, max_rows: int = 50) -> str:
+        def _query(
+            db_path: str,
+            query: str,
+            max_rows: int | None = 50,
+        ) -> str:
             try:
                 statement = query.strip()
                 if (
@@ -103,7 +107,8 @@ class SqliteCapabilityProvider(CapabilityProvider):
                     or ";" in statement.rstrip(";")
                 ):
                     raise ValueError("only one read-only SELECT/WITH/PRAGMA is allowed")
-                limit = max(1, min(max_rows, config.max_rows))
+                requested_rows = 50 if max_rows is None else max_rows
+                limit = max(1, min(requested_rows, config.max_rows))
                 path, connection = _connect(db_path)
                 try:
                     cursor = connection.execute(statement)
