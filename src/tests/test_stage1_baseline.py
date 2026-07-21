@@ -6,10 +6,12 @@ from pathlib import Path
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
+import pytest
+
 from agent_core.benchmark.aggregator import aggregate_run
 from agent_core.benchmark.evaluator import evaluate
 from agent_core.benchmark.models import BenchmarkCase, BenchmarkSuite
-from agent_core.benchmark.runner import _prepare_case
+from agent_core.benchmark.runner import _filter_suite_cases, _prepare_case
 from agent_core.benchmark.worker import _run_conversation_case
 from agent_core.conversation.models import Turn
 from agent_core.conversation.manager import ConversationConfig, ConversationManager
@@ -182,6 +184,30 @@ def test_benchmark_suite_and_evaluator(tmp_path: Path):
         "execution_log": [{"tool_used": "count_lines"}],
     }
     assert evaluate(suite.cases[0], result)["passed"] is True
+
+
+def test_benchmark_case_filter_preserves_suite_order():
+    suite = BenchmarkSuite(
+        name="filter-test",
+        warmup_runs=0,
+        measured_runs=1,
+        cases=(
+            BenchmarkCase(case_id="a", category="W1"),
+            BenchmarkCase(case_id="b", category="W2"),
+            BenchmarkCase(case_id="c", category="W3"),
+        ),
+    )
+    filtered = _filter_suite_cases(suite, ("c", "a"))
+    assert [case.case_id for case in filtered.cases] == ["a", "c"]
+
+
+def test_benchmark_case_filter_rejects_unknown_id():
+    suite = BenchmarkSuite(
+        name="filter-test",
+        cases=(BenchmarkCase(case_id="known", category="W1"),),
+    )
+    with pytest.raises(ValueError, match="Unknown benchmark case_id"):
+        _filter_suite_cases(suite, ("missing",))
 
 
 def test_evaluator_checks_tool_order_and_count():

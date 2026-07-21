@@ -15,6 +15,7 @@ import subprocess
 import sys
 import uuid
 import importlib.metadata
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,28 @@ from agent_core.benchmark.aggregator import aggregate_run
 from agent_core.benchmark.models import BenchmarkSuite
 from agent_core.benchmark.report import write_report
 from agent_core.config import load_engine_config, load_memory_config
+
+
+def _filter_suite_cases(
+    suite: BenchmarkSuite,
+    case_ids: tuple[str, ...],
+) -> BenchmarkSuite:
+    """Return a suite containing only requested IDs, in suite-file order."""
+    if not case_ids:
+        return suite
+
+    requested = set(case_ids)
+    available = {case.case_id for case in suite.cases}
+    unknown = sorted(requested - available)
+    if unknown:
+        choices = ", ".join(sorted(available))
+        raise ValueError(
+            f"Unknown benchmark case_id(s): {', '.join(unknown)}. "
+            f"Available case_ids: {choices}"
+        )
+
+    selected = tuple(case for case in suite.cases if case.case_id in requested)
+    return replace(suite, cases=selected)
 
 
 class BenchmarkRunner:
@@ -34,15 +57,18 @@ class BenchmarkRunner:
         output_root: Path = Path("benchmark/results"),
         round_name: str = "R0",
         engine_overrides: dict[str, Any] | None = None,
+        case_ids: tuple[str, ...] = (),
     ) -> None:
         self.config_file = config_file.resolve()
         self.suite_file = suite_file.resolve()
         self.output_root = output_root.resolve()
         self.round_name = round_name
         self.engine_overrides = engine_overrides or {}
+        self.case_ids = tuple(dict.fromkeys(case_ids))
 
     def run(self) -> Path:
         suite = BenchmarkSuite.load(self.suite_file)
+        suite = _filter_suite_cases(suite, self.case_ids)
         run_id = (
             f"{self.round_name}-{suite.name}-"
             f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-"
@@ -50,7 +76,9 @@ class BenchmarkRunner:
         )
         run_dir = self.output_root / run_id
         manifest = self._manifest(run_id, suite)
-        if self.round_name == "R0" and any(manifest["memory_flags"].values()):
+        if self.round_name.upper().startswith("R0") and any(
+            manifest["memory_flags"].values()
+        ):
             raise ValueError(
                 "R0 requires every [memory] optimization switch to be false"
             )
@@ -149,6 +177,7 @@ class BenchmarkRunner:
                 "measured_runs": suite.measured_runs,
                 "seed": suite.seed,
                 "case_count": len(suite.cases),
+                "case_filter": list(self.case_ids),
             },
             "model": {
                 "path": str(model_path),

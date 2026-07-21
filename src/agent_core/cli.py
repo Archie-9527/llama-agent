@@ -124,6 +124,17 @@ def _build_parser() -> argparse.ArgumentParser:
         "--output-root", type=Path, default=Path("benchmark/results")
     )
     benchmark_p.add_argument("--round", dest="round_name", default="R0")
+    benchmark_p.add_argument(
+        "--case",
+        dest="case_ids",
+        action="append",
+        default=[],
+        metavar="CASE_ID",
+        help=(
+            "Run only the selected benchmark case_id. Repeat --case to "
+            "select multiple cases."
+        ),
+    )
 
     return parser
 
@@ -249,6 +260,7 @@ def main(argv: list[str] | None = None) -> int:
                 output_root=args.output_root,
                 round_name=args.round_name,
                 engine_overrides=_collect_engine_cli_overrides(args),
+                case_ids=tuple(args.case_ids),
             ).run()
         except Exception as exc:
             logger.exception("Benchmark failed")

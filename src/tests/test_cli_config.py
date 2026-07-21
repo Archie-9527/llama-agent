@@ -73,6 +73,24 @@ def _write_toml(path: Path, content: str) -> None:
     path.write_text(content)
 
 
+def test_benchmark_parser_accepts_repeated_case_filters():
+    args = _build_parser().parse_args(
+        [
+            "benchmark",
+            "--suite",
+            "benchmark/workloads/r0_full.json",
+            "--case",
+            "w2-sqlite-investigation",
+            "--case",
+            "w7-eight-turn-memory",
+        ]
+    )
+    assert args.case_ids == [
+        "w2-sqlite-investigation",
+        "w7-eight-turn-memory",
+    ]
+
+
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
 

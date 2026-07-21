@@ -48,6 +48,38 @@ llama-agent --config agent_config.toml benchmark \
 16/64 KiB 工具输出、多工具证据链、失败恢复、八轮会话和工具证据跨轮引用。
 网络 Provider 已移除，所有 fixture 均由 worker 在样本目录内确定性生成。
 
+只回归一个用例时使用 `--case`：
+
+```bash
+llama-agent --config agent_config.toml benchmark \
+  --suite benchmark/workloads/r0_full.json \
+  --output-root benchmark/results \
+  --round R0-regression \
+  --case w2-sqlite-investigation
+```
+
+`--case` 可以重复使用，以 Suite 文件中的顺序执行多个用例：
+
+```bash
+llama-agent --config agent_config.toml benchmark \
+  --suite benchmark/workloads/r0_full.json \
+  --output-root benchmark/results \
+  --round R0-regression \
+  --case w2-sqlite-investigation \
+  --case w5-multi-tool-incident \
+  --case w6-readonly-recovery
+```
+
+快速复测上一轮全部失败类别时，可以使用只执行一次、不含 warmup 的
+`benchmark/workloads/r0_failed_regression.json`：
+
+```bash
+llama-agent --config agent_config.toml benchmark \
+  --suite benchmark/workloads/r0_failed_regression.json \
+  --output-root benchmark/results \
+  --round R0-regression
+```
+
 每个 warmup/测量样本在新的 Python 进程中加载模型并执行，避免 llama.cpp
 分配器、KV 状态或上一个任务污染后续样本。输出目录包含：
 
