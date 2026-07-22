@@ -16,6 +16,7 @@ decision, keeping the "how to route" logic in a single file.
 from __future__ import annotations
 
 import json
+import re
 from typing import TYPE_CHECKING
 
 from agent_core.exceptions import ReflectionError
@@ -46,6 +47,50 @@ REFLECTION_SCHEMA: dict = {
     },
     "required": ["decision", "reason"],
 }
+
+
+def _parse_reflection_output(raw: str) -> object:
+    """Parse one constrained value while tolerating harmless trailing text.
+
+    Some local models emit a valid JSON object and then append a Markdown
+    explanation despite grammar/prompt constraints.  ``raw_decode`` preserves
+    strict validation of the first JSON value without accepting a fabricated
+    decision from arbitrary prose.
+    """
+    stripped = raw.strip()
+    try:
+        return json.loads(stripped)
+    except json.JSONDecodeError:
+        decoder = json.JSONDecoder()
+        candidate_offsets = [0]
+        candidate_offsets.extend(
+            index for index, char in enumerate(stripped) if char == "{"
+        )
+        seen: set[int] = set()
+        for offset in candidate_offsets:
+            if offset in seen:
+                continue
+            seen.add(offset)
+            try:
+                value, _ = decoder.raw_decode(stripped[offset:])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(value, dict) and "decision" in value:
+                return value
+        # Qwen occasionally closes the final JSON string with a typographic
+        # quote (”) before appending prose.  Recover only the exact constrained
+        # reflection shape and still validate the enum in ``reflector_node``.
+        near_json = re.search(
+            r'\{\s*"decision"\s*:\s*"(?P<decision>done|continue|failed)"\s*,'
+            r'\s*"reason"\s*:\s*"(?P<reason>.*?)(?:"|”)\s*\}',
+            stripped,
+            re.DOTALL,
+        )
+        if near_json:
+            return near_json.groupdict()
+        # Backward compatibility for old checkpoints/tests that returned a
+        # bare, optionally quoted enum instead of the structured schema.
+        return stripped.strip('"').strip("'")
 
 
 # ---------------------------------------------------------------------------
@@ -82,10 +127,7 @@ def reflector_node(state: "AgentState") -> "AgentState":
     response = engine.invoke(messages, grammar=grammar)
     raw = str(response.content).strip()
     reason = ""
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError:
-        parsed = raw.strip('"').strip("'")
+    parsed = _parse_reflection_output(raw)
     if isinstance(parsed, dict):
         decision = str(parsed.get("decision", "")).strip()
         reason = str(parsed.get("reason", "")).strip()

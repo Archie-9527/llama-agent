@@ -261,6 +261,17 @@ def test_aggregator_reports_r1_byte_reduction(tmp_path: Path):
                 "evaluation": {"passed": True},
             }
         )
+        + "\n"
+        + json.dumps(
+            {
+                "case_id": "r1",
+                "category": "R1-preview",
+                "measured": False,
+                "repetition": 1,
+                "duration_ms": 20,
+                "evaluation": {"passed": False},
+            }
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -289,6 +300,17 @@ def test_aggregator_reports_r1_byte_reduction(tmp_path: Path):
     )
     artifact.parent.mkdir(parents=True)
     artifact.write_bytes(b"1234567")
+    warmup_artifact = (
+        tmp_path
+        / "cases"
+        / "r1"
+        / "rep-001"
+        / "artifacts"
+        / "content"
+        / "warmup.bin"
+    )
+    warmup_artifact.parent.mkdir(parents=True)
+    warmup_artifact.write_bytes(b"warmup-must-not-be-counted")
 
     summary = aggregate_run(tmp_path)
 
@@ -297,3 +319,5 @@ def test_aggregator_reports_r1_byte_reduction(tmp_path: Path):
     assert summary["artifact_bytes_saved"] == 9_000
     assert summary["artifact_reduction_ratio"] == pytest.approx(0.9)
     assert summary["artifact_storage_bytes"] == 7
+    assert summary["warmup_sample_count"] == 1
+    assert summary["warmup_failed_count"] == 1

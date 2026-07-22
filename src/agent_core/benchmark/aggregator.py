@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import statistics
 from pathlib import Path
 from typing import Any
@@ -13,7 +14,9 @@ def _distribution(values: list[float]) -> dict[str, float | None]:
     if not values:
         return {"mean": None, "median": None, "p95": None, "stdev": None}
     ordered = sorted(values)
-    p95_index = min(len(ordered) - 1, max(0, int(0.95 * len(ordered)) - 1))
+    # Nearest-rank percentile: for five samples P95 is the maximum, rather
+    # than the second-largest value produced by truncating 0.95 * n.
+    p95_index = min(len(ordered) - 1, max(0, math.ceil(0.95 * len(ordered)) - 1))
     return {
         "mean": statistics.fmean(values),
         "median": statistics.median(values),
@@ -32,8 +35,12 @@ def aggregate_run(run_dir: Path) -> dict[str, Any]:
             if line.strip()
         ]
     measured = [item for item in results if item.get("measured", True)]
+    warmup = [item for item in results if not item.get("measured", True)]
     duration = [float(item["duration_ms"]) for item in measured]
     successes = [item for item in measured if item.get("evaluation", {}).get("passed")]
+    warmup_successes = [
+        item for item in warmup if item.get("evaluation", {}).get("passed")
+    ]
 
     by_category: dict[str, dict[str, int]] = {}
     for item in measured:
@@ -122,6 +129,9 @@ def aggregate_run(run_dir: Path) -> dict[str, Any]:
         "passed_count": len(successes),
         "failed_count": len(measured) - len(successes),
         "task_success_rate": len(successes) / len(measured) if measured else 0.0,
+        "warmup_sample_count": len(warmup),
+        "warmup_passed_count": len(warmup_successes),
+        "warmup_failed_count": len(warmup) - len(warmup_successes),
         "duration_ms": _distribution(duration),
         "peak_rss_bytes": max(rss_values) if rss_values else None,
         "peak_logical_kv_tokens": max(kv_tokens) if kv_tokens else None,
@@ -145,24 +155,43 @@ def aggregate_run(run_dir: Path) -> dict[str, Any]:
             if externalized_tool_output_bytes
             else 0.0
         ),
-        "artifact_storage_bytes": sum(
-            path.stat().st_size
-            for path in run_dir.glob("cases/**/artifacts/**/*")
-            if path.is_file()
+        "artifact_storage_bytes": _measured_storage_bytes(
+            run_dir,
+            "cases/**/artifacts/**/*",
+            measured_keys,
         ),
         "peak_gpu_process_bytes": (
             max(process_gpu_values) if process_gpu_values else None
         ),
-        "checkpoint_bytes": sum(
-            path.stat().st_size
-            for path in run_dir.glob("cases/**/checkpoints.sqlite")
+        "checkpoint_bytes": _measured_storage_bytes(
+            run_dir,
+            "cases/**/checkpoints.sqlite",
+            measured_keys,
         ),
-        "conversation_bytes": sum(
-            path.stat().st_size
-            for path in run_dir.glob("cases/**/conversations.sqlite")
+        "conversation_bytes": _measured_storage_bytes(
+            run_dir,
+            "cases/**/conversations.sqlite",
+            measured_keys,
         ),
         "categories": by_category,
     }
+
+
+def _measured_storage_bytes(
+    run_dir: Path,
+    pattern: str,
+    measured_keys: set[tuple[str, str]],
+) -> int:
+    """Sum files belonging to measured samples, excluding warmup storage."""
+    total = 0
+    cases_root = run_dir / "cases"
+    for path in run_dir.glob(pattern):
+        if not path.is_file():
+            continue
+        parts = path.relative_to(cases_root).parts
+        if len(parts) >= 2 and (parts[0], parts[1]) in measured_keys:
+            total += path.stat().st_size
+    return total
 
 
 def _measured_jsonl(

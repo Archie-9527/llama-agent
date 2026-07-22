@@ -726,6 +726,33 @@ class TestReflector:
         assert result["status"] == "continue"
         assert "invalid relative database path" in result["reflection_notes"][-1]
 
+    @pytest.mark.parametrize(
+        "content",
+        [
+            '{"decision":"done","reason":"all tools completed"}\n```\nextra',
+            (
+                '{"decision":"done","reason":"所有步骤均已完成。”}\n```\n'
+                'Wait, I need to fix the output format.'
+            ),
+        ],
+    )
+    def test_reflector_accepts_valid_prefix_with_model_trailing_text(
+        self, base_state, content
+    ):
+        mock_engine = MagicMock()
+        mock_engine.invoke.return_value = AIMessage(content=content)
+
+        with patch(
+            "agent_core.graph.reflector.get_engine", return_value=mock_engine
+        ), patch(
+            "agent_core.graph.reflector.assemble_reflection_prompt",
+            return_value=[SystemMessage(content="test")],
+        ):
+            result = reflector_node(base_state)
+
+        assert result["status"] == "done"
+        assert "decision=done" in result["reflection_notes"][-1]
+
     def test_reflector_invalid_decision_raises(self, base_state):
         """A9: Any decision outside {done, continue, failed} → ReflectionError."""
         base_state["task_goal"] = "test"

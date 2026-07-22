@@ -340,6 +340,8 @@ def test_aggregator_keeps_failed_samples(tmp_path: Path):
     assert summary["sample_count"] == 2
     assert summary["failed_count"] == 1
     assert summary["task_success_rate"] == 0.5
+    assert summary["duration_ms"]["p95"] == 20
+    assert summary["warmup_sample_count"] == 0
 
 
 def test_case_round_trip():

@@ -139,6 +139,32 @@ llama-agent --config agent_config.toml benchmark \
 运行，并将 `--round` 设为 `R1-ablation`；这样任务、fixture、模型和评价规则均
 与 R0 一致。上面的 R1 专用 Suite 主要用于验证虚拟化描述和按需检索能力。
 
+```bash
+# R0：全部内存优化关闭
+AGENT_MEMORY_ARTIFACT_VIRTUALIZATION=false \
+AGENT_MEMORY_LIFECYCLE_CONTEXT=false \
+AGENT_MEMORY_KV_LIFECYCLE=false \
+AGENT_MEMORY_BRANCH_MANAGEMENT=false \
+llama-agent --config agent_config.toml benchmark \
+  --suite benchmark/workloads/r0_full.json \
+  --output-root benchmark/results \
+  --round R0-artifact-ablation \
+  --case w4-large-file-16k \
+  --case w4-large-file-64k
+
+# R1：只打开工具输出虚拟化，其余条件完全相同
+AGENT_MEMORY_ARTIFACT_VIRTUALIZATION=true \
+AGENT_MEMORY_LIFECYCLE_CONTEXT=false \
+AGENT_MEMORY_KV_LIFECYCLE=false \
+AGENT_MEMORY_BRANCH_MANAGEMENT=false \
+llama-agent --config agent_config.toml benchmark \
+  --suite benchmark/workloads/r0_full.json \
+  --output-root benchmark/results \
+  --round R1-artifact-ablation \
+  --case w4-large-file-16k \
+  --case w4-large-file-64k
+```
+
 ## 遥测口径
 
 - `logical_tokens`、`position_span_tokens`：KV 逻辑占用，不是显存字节。
