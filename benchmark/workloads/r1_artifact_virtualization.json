@@ -52,7 +52,8 @@
       "forbidden_tools": ["execute_shell_command", "retrieve_artifact"],
       "metadata": {
         "fixture_size_bytes": 262144,
-        "fixture_marker": "R1_HIDDEN_EVIDENCE"
+        "fixture_marker": "R1_HIDDEN_EVIDENCE",
+        "fixture_marker_position": "middle"
       }
     }
   ]

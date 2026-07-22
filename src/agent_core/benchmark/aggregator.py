@@ -147,7 +147,7 @@ def aggregate_run(run_dir: Path) -> dict[str, Any]:
         ),
         "artifact_storage_bytes": sum(
             path.stat().st_size
-            for path in run_dir.glob("cases/**/artifacts/**")
+            for path in run_dir.glob("cases/**/artifacts/**/*")
             if path.is_file()
         ),
         "peak_gpu_process_bytes": (

@@ -17,8 +17,10 @@ from agent_core.artifacts.virtualizer import (
 )
 from agent_core.benchmark.aggregator import aggregate_run
 from agent_core.benchmark.models import BenchmarkSuite
+from agent_core.benchmark.runner import _prepare_case, _worker_environment
 from agent_core.capability_registry import Capability
 from agent_core.config import MemoryConfig, load_memory_config
+from agent_core.graph.planner import _enforce_explicit_tool_sequence
 from agent_core.graph.react_agent_factory import _run_capability
 from agent_core.telemetry import telemetry_task
 
@@ -151,6 +153,100 @@ def test_r1_suite_is_valid_and_covers_preview_and_on_demand():
         "R1-on-demand",
     }
     assert "search_artifact" in suite.cases[-1].expected_tools
+    assert suite.cases[-1].metadata["fixture_marker_position"] == "middle"
+
+
+def test_on_demand_fixture_hides_evidence_from_head_and_tail(tmp_path: Path):
+    case = BenchmarkSuite.load(
+        Path("benchmark/workloads/r1_artifact_virtualization.json")
+    ).cases[-1]
+    _prepare_case(case, tmp_path / "sample")
+    payload = (tmp_path / "sample" / "payload.txt").read_text()
+
+    marker_index = payload.index("R1_HIDDEN_EVIDENCE")
+    assert len(payload) // 3 < marker_index < len(payload) * 2 // 3
+    assert "R1_HIDDEN_EVIDENCE" not in payload[:2000]
+    assert "R1_HIDDEN_EVIDENCE" not in payload[-2000:]
+
+
+def test_planner_restores_explicit_missing_tool_step(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    capabilities = [
+        Capability("read_file", "read", {}, lambda: ""),
+        Capability("search_artifact", "search", {}, lambda: ""),
+    ]
+    monkeypatch.setattr(
+        "agent_core.capability_registry.list_capabilities",
+        lambda: capabilities,
+    )
+    goal = (
+        "第一步调用 read_file 读取文件；第二步调用 search_artifact "
+        "搜索目标证据。"
+    )
+
+    plan = _enforce_explicit_tool_sequence(
+        goal,
+        ["使用 read_file 读取指定文件"],
+    )
+
+    assert len(plan) == 2
+    assert "read_file" in plan[0]
+    assert "search_artifact" in plan[1]
+
+
+def test_planner_does_not_restore_already_executed_tool(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    capabilities = [
+        Capability("read_file", "read", {}, lambda: ""),
+        Capability("search_artifact", "search", {}, lambda: ""),
+    ]
+    monkeypatch.setattr(
+        "agent_core.capability_registry.list_capabilities",
+        lambda: capabilities,
+    )
+    goal = "调用 read_file 后调用 search_artifact"
+
+    plan = _enforce_explicit_tool_sequence(
+        goal,
+        ["使用 search_artifact 搜索已有 artifact"],
+        executed_tools=["read_file"],
+    )
+
+    assert plan == ["使用 search_artifact 搜索已有 artifact"]
+
+
+def test_planner_does_not_force_negated_tool(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    capabilities = [
+        Capability("read_file", "read", {}, lambda: ""),
+        Capability("search_artifact", "search", {}, lambda: ""),
+    ]
+    monkeypatch.setattr(
+        "agent_core.capability_registry.list_capabilities",
+        lambda: capabilities,
+    )
+
+    plan = _enforce_explicit_tool_sequence(
+        "不要再次调用 read_file，直接回答。",
+        ["直接回答已有证据"],
+    )
+
+    assert plan == ["直接回答已有证据"]
+
+
+def test_worker_environment_freezes_resolved_memory_config():
+    environment = _worker_environment(
+        memory_config={
+            "artifact_virtualization": True,
+            "artifact_inline_max_bytes": 4096,
+        }
+    )
+
+    assert environment["AGENT_MEMORY_ARTIFACT_VIRTUALIZATION"] == "true"
+    assert environment["AGENT_MEMORY_ARTIFACT_INLINE_MAX_BYTES"] == "4096"
 
 
 def test_aggregator_reports_r1_byte_reduction(tmp_path: Path):
@@ -182,6 +278,17 @@ def test_aggregator_reports_r1_byte_reduction(tmp_path: Path):
         + "\n",
         encoding="utf-8",
     )
+    artifact = (
+        tmp_path
+        / "cases"
+        / "r1"
+        / "rep-000"
+        / "artifacts"
+        / "content"
+        / "value.bin"
+    )
+    artifact.parent.mkdir(parents=True)
+    artifact.write_bytes(b"1234567")
 
     summary = aggregate_run(tmp_path)
 
@@ -189,4 +296,4 @@ def test_aggregator_reports_r1_byte_reduction(tmp_path: Path):
     assert summary["externalized_tool_output_bytes"] == 10_000
     assert summary["artifact_bytes_saved"] == 9_000
     assert summary["artifact_reduction_ratio"] == pytest.approx(0.9)
-    assert summary["artifact_storage_bytes"] == 0
+    assert summary["artifact_storage_bytes"] == 7

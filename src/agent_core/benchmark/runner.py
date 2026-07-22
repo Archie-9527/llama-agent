@@ -82,6 +82,14 @@ class BenchmarkRunner:
             raise ValueError(
                 "R0 requires every [memory] optimization switch to be false"
             )
+        if self.round_name.upper().startswith("R1") and not manifest[
+            "memory_flags"
+        ]["artifact_virtualization"]:
+            raise ValueError(
+                "R1 requires memory.artifact_virtualization=true; set it in "
+                "the config file or with "
+                "AGENT_MEMORY_ARTIFACT_VIRTUALIZATION=true"
+            )
         cases_dir = run_dir / "cases"
         cases_dir.mkdir(parents=True, exist_ok=False)
         _write_json(run_dir / "manifest.json", manifest)
@@ -116,7 +124,10 @@ class BenchmarkRunner:
                     cwd=Path.cwd(),
                     text=True,
                     capture_output=True,
-                    env=_worker_environment(self.engine_overrides),
+                    env=_worker_environment(
+                        self.engine_overrides,
+                        memory_config=manifest["memory_config"],
+                    ),
                 )
                 if result_file.exists():
                     result = json.loads(result_file.read_text(encoding="utf-8"))
@@ -237,6 +248,7 @@ def _append_jsonl(path: Path, value: dict[str, Any]) -> None:
 
 def _worker_environment(
     engine_overrides: dict[str, Any] | None = None,
+    memory_config: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     environment = os.environ.copy()
     source_dir = str((Path.cwd() / "src").resolve())
@@ -246,6 +258,12 @@ def _worker_environment(
     )
     for key, value in (engine_overrides or {}).items():
         environment[f"AGENT_{key.upper()}"] = str(value)
+    # Freeze the parent process's resolved memory policy into every fresh
+    # worker.  Workers must not observe a config file edited halfway through a
+    # long benchmark, and manifest.json must describe what they actually ran.
+    for key, value in (memory_config or {}).items():
+        rendered = str(value).lower() if isinstance(value, bool) else str(value)
+        environment[f"AGENT_MEMORY_{key.upper()}"] = rendered
     return environment
 
 
@@ -339,7 +357,15 @@ def _prepare_case(case, sample_dir: Path) -> dict[str, Any]:
     if size > 0:
         marker = str(case.metadata.get("fixture_marker", "AGENTMEM_PAYLOAD"))
         fixture = sample_dir / "payload.txt"
-        _write_payload_fixture(fixture, size=size, marker=marker)
+        marker_position = str(
+            case.metadata.get("fixture_marker_position", "end")
+        )
+        _write_payload_fixture(
+            fixture,
+            size=size,
+            marker=marker,
+            marker_position=marker_position,
+        )
         replacements["{fixture_path}"] = str(fixture)
 
     if case.metadata.get("incident_fixture"):
@@ -364,17 +390,26 @@ def _prepare_case(case, sample_dir: Path) -> dict[str, Any]:
     return _replace_placeholders(raw, replacements)
 
 
-def _write_payload_fixture(path: Path, *, size: int, marker: str) -> None:
-    """Create non-repetitive filler with one marker near the end."""
+def _write_payload_fixture(
+    path: Path,
+    *,
+    size: int,
+    marker: str,
+    marker_position: str = "end",
+) -> None:
+    """Create deterministic filler with one marker at end or middle."""
+    if marker_position not in {"end", "middle"}:
+        raise ValueError("fixture_marker_position must be 'end' or 'middle'")
     critical = (
         f"\nFINAL_EVIDENCE marker={marker} request_id=req-7319 "
         "root_cause=connection_pool_exhausted\n"
     ).encode("utf-8")
+    if len(critical) > size:
+        raise ValueError("fixture_size_bytes is too small for FINAL_EVIDENCE")
     filler_lines = []
     index = 0
-    target = max(0, size - len(critical))
     written = 0
-    while written < target:
+    while written < size:
         line = (
             f"record={index:06d} status=ok latency_ms={20 + index % 17} "
             f"checksum={(index * 2654435761) & 0xFFFFFFFF:08x}\n"
@@ -382,8 +417,14 @@ def _write_payload_fixture(path: Path, *, size: int, marker: str) -> None:
         filler_lines.append(line)
         written += len(line)
         index += 1
-    payload = b"".join(filler_lines)[:target] + critical
-    path.write_bytes(payload[:size])
+    filler = b"".join(filler_lines)[:size]
+    insertion = (
+        size - len(critical)
+        if marker_position == "end"
+        else (size - len(critical)) // 2
+    )
+    payload = filler[:insertion] + critical + filler[insertion + len(critical) :]
+    path.write_bytes(payload)
 
 
 def _write_incident_fixture(sample_dir: Path) -> dict[str, str]:

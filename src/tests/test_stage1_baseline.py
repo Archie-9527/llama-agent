@@ -293,6 +293,27 @@ def test_prepare_case_builds_deterministic_local_evidence(tmp_path: Path):
     assert row == ("connection_pool_exhausted",)
 
 
+def test_prepare_case_can_place_evidence_in_middle(tmp_path: Path):
+    case = BenchmarkCase(
+        case_id="middle-fixture",
+        category="fixture",
+        goal="inspect {fixture_path}",
+        metadata={
+            "fixture_size_bytes": 8192,
+            "fixture_marker": "MIDDLE_ONLY",
+            "fixture_marker_position": "middle",
+        },
+    )
+
+    _prepare_case(case, tmp_path / "sample")
+    payload = (tmp_path / "sample" / "payload.txt").read_text()
+
+    assert len(payload.encode("utf-8")) == 8192
+    assert payload.count("MIDDLE_ONLY") == 1
+    assert "MIDDLE_ONLY" not in payload[:1000]
+    assert "MIDDLE_ONLY" not in payload[-1000:]
+
+
 def test_aggregator_keeps_failed_samples(tmp_path: Path):
     records = [
         {
