@@ -17,6 +17,7 @@ from agent_core.capabilities.bootstrap import bootstrap_capabilities
 from agent_core.config import (
     load_app_config,
     load_engine_config,
+    load_memory_config,
     load_tools_config,
     load_telemetry_config,
 )
@@ -115,6 +116,11 @@ def main(argv: list[str] | None = None) -> int:
             args.output_dir / "artifacts"
         )
         bootstrap_capabilities(load_tools_config(args.config))
+        from agent_core.artifacts.virtualizer import (
+            initialize_artifact_virtualizer,
+        )
+
+        initialize_artifact_virtualizer(load_memory_config(args.config))
         initialize_react_agent()
 
         runner_config = app.to_run_config()

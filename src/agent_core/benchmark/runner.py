@@ -190,7 +190,13 @@ class BenchmarkRunner:
                 for key, value in engine.__dict__.items()
                 if key != "model_path"
             },
-            "memory_flags": memory.__dict__,
+            "memory_flags": {
+                "artifact_virtualization": memory.artifact_virtualization,
+                "lifecycle_context": memory.lifecycle_context,
+                "kv_lifecycle": memory.kv_lifecycle,
+                "branch_management": memory.branch_management,
+            },
+            "memory_config": memory.__dict__,
             "environment": {
                 "python": sys.version,
                 "platform": platform.platform(),

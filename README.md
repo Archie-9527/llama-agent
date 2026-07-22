@@ -99,6 +99,46 @@ cases/
 
 `R0` 会拒绝任何已启用的 `[memory]` 优化开关，以确保基线没有混入后续优化。
 
+## R1 工具输出虚拟化
+
+R1 在统一工具执行边界检查结果大小。超过
+`memory.artifact_inline_max_bytes` 的原始结果写入任务隔离的 ArtifactStore，
+模型上下文只保留确定性摘要、首尾预览、内容哈希和 `artifact://` 引用；需要
+更多证据时可调用 `search_artifact` 或 `retrieve_artifact` 按需读取。
+
+默认配置保持 `artifact_virtualization = false`，因此可继续执行 R0。R1 可通过
+环境变量临时开启，无需修改基线配置文件：
+
+```bash
+AGENT_MEMORY_ARTIFACT_VIRTUALIZATION=true \
+llama-agent --config agent_config.toml benchmark \
+  --suite benchmark/workloads/r1_artifact_virtualization.json \
+  --output-root benchmark/results \
+  --round R1
+```
+
+只回归按需检索链路：
+
+```bash
+AGENT_MEMORY_ARTIFACT_VIRTUALIZATION=true \
+llama-agent --config agent_config.toml benchmark \
+  --suite benchmark/workloads/r1_artifact_virtualization.json \
+  --output-root benchmark/results \
+  --round R1-regression \
+  --case r1-artifact-on-demand-search
+```
+
+阈值、首尾预览和摘要长度也可分别通过
+`AGENT_MEMORY_ARTIFACT_INLINE_MAX_BYTES`、
+`AGENT_MEMORY_ARTIFACT_PREVIEW_CHARS`、
+`AGENT_MEMORY_ARTIFACT_SUMMARY_CHARS` 覆盖。报告会额外给出外置字节、模型
+内联字节、减少量、压缩率和 Artifact 磁盘成本。
+
+若要做严格的 R0/R1 同用例对照，应保持 R0 的 workload 不变，只打开 R1
+开关。例如可对 `r0_full.json` 中的 16/64 KiB 两个样本使用重复的 `--case`
+运行，并将 `--round` 设为 `R1-ablation`；这样任务、fixture、模型和评价规则均
+与 R0 一致。上面的 R1 专用 Suite 主要用于验证虚拟化描述和按需检索能力。
+
 ## 遥测口径
 
 - `logical_tokens`、`position_span_tokens`：KV 逻辑占用，不是显存字节。

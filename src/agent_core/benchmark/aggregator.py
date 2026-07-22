@@ -92,6 +92,20 @@ def aggregate_run(run_dir: Path) -> dict[str, Any]:
         for item in tool_events
         if item.get("event") == "tool_completed"
     )
+    virtualization_events = [
+        item
+        for item in tool_events
+        if item.get("event") == "artifact_virtualized"
+    ]
+    externalized_tool_output_bytes = sum(
+        int(item.get("original_bytes", 0)) for item in virtualization_events
+    )
+    virtualized_inline_bytes = sum(
+        int(item.get("inline_bytes", 0)) for item in virtualization_events
+    )
+    artifact_bytes_saved = sum(
+        int(item.get("bytes_saved", 0)) for item in virtualization_events
+    )
 
     process_gpu_values: list[float] = []
     root_memory = run_dir / "system_memory.csv"
@@ -122,6 +136,20 @@ def aggregate_run(run_dir: Path) -> dict[str, Any]:
         },
         "prompt_eval_ms": _distribution(prompt_eval_ms),
         "tool_output_bytes": tool_output_bytes,
+        "virtualized_tool_result_count": len(virtualization_events),
+        "externalized_tool_output_bytes": externalized_tool_output_bytes,
+        "virtualized_inline_bytes": virtualized_inline_bytes,
+        "artifact_bytes_saved": artifact_bytes_saved,
+        "artifact_reduction_ratio": (
+            artifact_bytes_saved / externalized_tool_output_bytes
+            if externalized_tool_output_bytes
+            else 0.0
+        ),
+        "artifact_storage_bytes": sum(
+            path.stat().st_size
+            for path in run_dir.glob("cases/**/artifacts/**")
+            if path.is_file()
+        ),
         "peak_gpu_process_bytes": (
             max(process_gpu_values) if process_gpu_values else None
         ),

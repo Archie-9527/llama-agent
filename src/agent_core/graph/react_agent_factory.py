@@ -50,6 +50,11 @@ def _run_capability(cap: Capability, kwargs: dict) -> object:
             key: value for key, value in kwargs.items() if value is not None
         }
         result = cap.handler(**normalized_kwargs)
+        # R1 interception lives at the one boundary shared by every tool.  A
+        # disabled policy returns the exact original object, preserving R0.
+        from agent_core.artifacts.virtualizer import maybe_virtualize_tool_result
+
+        inline_result = maybe_virtualize_tool_result(cap.name, result)
     except Exception as exc:
         telemetry.record_event(
             "tool_events.jsonl",
@@ -68,7 +73,7 @@ def _run_capability(cap: Capability, kwargs: dict) -> object:
         input_bytes=len(str(kwargs).encode("utf-8")),
         output_bytes=len(str(result).encode("utf-8")),
     )
-    return result
+    return inline_result
 
 # ---------------------------------------------------------------------------
 # Feature flag

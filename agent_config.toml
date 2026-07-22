@@ -128,7 +128,12 @@ collect_accelerator = true
 collect_state_size = false
 
 [memory]
+# R1：超过阈值的工具结果存入 ArtifactStore，仅把摘要、首尾预览和引用送入模型。
+# false 时完全保持 R0 行为；也可通过 AGENT_MEMORY_ARTIFACT_VIRTUALIZATION 覆盖。
 artifact_virtualization = false
+artifact_inline_max_bytes = 8192
+artifact_preview_chars = 1200
+artifact_summary_chars = 600
 lifecycle_context = false
 kv_lifecycle = false
 branch_management = false

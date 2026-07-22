@@ -1,0 +1,59 @@
+{
+  "name": "r1-artifact-virtualization",
+  "seed": 43,
+  "warmup_runs": 1,
+  "measured_runs": 5,
+  "cases": [
+    {
+      "case_id": "r1-large-file-16k-preview",
+      "category": "R1-preview",
+      "goal": "调用 read_file 从 offset=0 读取 {fixture_path}，length=20000。根据工具返回的首尾预览直接回答 FINAL_EVIDENCE 中的 marker、request_id 和 root_cause，不要读取整个 artifact。",
+      "expected_status": "done",
+      "expected_contains": ["R1_AGENTMEM_16K", "req-7319", "connection_pool_exhausted"],
+      "expected_tool_result_contains": ["virtualized", "artifact://", "R1_AGENTMEM_16K", "req-7319", "connection_pool_exhausted"],
+      "expected_tools": ["read_file"],
+      "expected_tool_sequence": ["read_file"],
+      "min_tool_calls": 1,
+      "max_tool_calls": 2,
+      "forbidden_tools": ["execute_shell_command", "retrieve_artifact", "search_artifact"],
+      "metadata": {
+        "fixture_size_bytes": 16384,
+        "fixture_marker": "R1_AGENTMEM_16K"
+      }
+    },
+    {
+      "case_id": "r1-large-file-64k-preview",
+      "category": "R1-preview",
+      "goal": "调用 read_file 从 offset=0 读取 {fixture_path}，length=70000。根据工具返回的首尾预览直接回答末尾 FINAL_EVIDENCE 中的 marker、request_id 和 root_cause，不要读取整个 artifact。",
+      "expected_status": "done",
+      "expected_contains": ["R1_AGENTMEM_64K", "req-7319", "connection_pool_exhausted"],
+      "expected_tool_result_contains": ["virtualized", "artifact://", "R1_AGENTMEM_64K", "req-7319", "connection_pool_exhausted"],
+      "expected_tools": ["read_file"],
+      "expected_tool_sequence": ["read_file"],
+      "min_tool_calls": 1,
+      "max_tool_calls": 2,
+      "forbidden_tools": ["execute_shell_command", "retrieve_artifact", "search_artifact"],
+      "metadata": {
+        "fixture_size_bytes": 65536,
+        "fixture_marker": "R1_AGENTMEM_64K"
+      }
+    },
+    {
+      "case_id": "r1-artifact-on-demand-search",
+      "category": "R1-on-demand",
+      "goal": "必须严格执行两步：第一步调用 read_file 从 offset=0 读取 {fixture_path}，length=270000；第二步从返回结果取得 artifact_id，并调用 search_artifact 在该 artifact 中搜索 R1_HIDDEN_EVIDENCE。最后回答命中的 marker、request_id 和 root_cause。",
+      "expected_status": "done",
+      "expected_contains": ["R1_HIDDEN_EVIDENCE", "req-7319", "connection_pool_exhausted"],
+      "expected_tool_result_contains": ["virtualized", "artifact://", "R1_HIDDEN_EVIDENCE", "req-7319", "connection_pool_exhausted"],
+      "expected_tools": ["read_file", "search_artifact"],
+      "expected_tool_sequence": ["read_file", "search_artifact"],
+      "min_tool_calls": 2,
+      "max_tool_calls": 3,
+      "forbidden_tools": ["execute_shell_command", "retrieve_artifact"],
+      "metadata": {
+        "fixture_size_bytes": 262144,
+        "fixture_marker": "R1_HIDDEN_EVIDENCE"
+      }
+    }
+  ]
+}

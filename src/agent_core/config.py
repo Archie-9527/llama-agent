@@ -87,9 +87,20 @@ class MemoryConfig:
     """Independent optimization switches required for later ablation rounds."""
 
     artifact_virtualization: bool = False
+    artifact_inline_max_bytes: int = 8192
+    artifact_preview_chars: int = 1200
+    artifact_summary_chars: int = 600
     lifecycle_context: bool = False
     kv_lifecycle: bool = False
     branch_management: bool = False
+
+    def validate(self) -> None:
+        if self.artifact_inline_max_bytes < 1:
+            raise ValueError("artifact_inline_max_bytes must be >= 1")
+        if self.artifact_preview_chars < 0:
+            raise ValueError("artifact_preview_chars must be >= 0")
+        if self.artifact_summary_chars < 1:
+            raise ValueError("artifact_summary_chars must be >= 1")
 
 
 # ---------------------------------------------------------------------------
@@ -119,13 +130,18 @@ _TELEMETRY_FIELD_CASTERS: dict[str, Callable] = {
 }
 
 _MEMORY_FIELD_CASTERS: dict[str, Callable] = {
-    name: (lambda v: str(v).strip().lower() in ("1", "true", "yes"))
-    for name in (
-        "artifact_virtualization",
-        "lifecycle_context",
-        "kv_lifecycle",
-        "branch_management",
-    )
+    **{
+        name: (lambda v: str(v).strip().lower() in ("1", "true", "yes"))
+        for name in (
+            "artifact_virtualization",
+            "lifecycle_context",
+            "kv_lifecycle",
+            "branch_management",
+        )
+    },
+    "artifact_inline_max_bytes": int,
+    "artifact_preview_chars": int,
+    "artifact_summary_chars": int,
 }
 
 _ENGINE_FIELD_CASTERS: dict[str, Callable] = {
@@ -361,4 +377,6 @@ def load_memory_config(
     )
     if cli_overrides:
         merged.update({k: v for k, v in cli_overrides.items() if v is not None})
-    return replace(MemoryConfig(), **merged)
+    config = replace(MemoryConfig(), **merged)
+    config.validate()
+    return config

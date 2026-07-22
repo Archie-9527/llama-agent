@@ -10,6 +10,7 @@ def write_report(
     run_dir: Path, manifest: dict[str, Any], summary: dict[str, Any]
 ) -> Path:
     duration = summary["duration_ms"]
+    memory_enabled = any(manifest.get("memory_flags", {}).values())
     lines = [
         f"# {manifest['round']} Benchmark 报告",
         "",
@@ -40,6 +41,12 @@ def write_report(
         f"- 累计 input tokens：{summary['input_tokens']['total']}",
         f"- 累计 output tokens：{summary['output_tokens']['total']}",
         f"- 工具输出字节：{summary['tool_output_bytes']}",
+        f"- R1 虚拟化工具结果数：{summary.get('virtualized_tool_result_count', 0)}",
+        f"- R1 外置原始字节：{summary.get('externalized_tool_output_bytes', 0)}",
+        f"- R1 模型内联字节：{summary.get('virtualized_inline_bytes', 0)}",
+        f"- R1 减少内联字节：{summary.get('artifact_bytes_saved', 0)}",
+        f"- R1 工具结果压缩率：{summary.get('artifact_reduction_ratio', 0.0):.2%}",
+        f"- Artifact 磁盘占用：{_mib(summary.get('artifact_storage_bytes'))}",
         f"- Checkpoint 文件总量：{_mib(summary['checkpoint_bytes'])}",
         f"- Conversation 文件总量：{_mib(summary['conversation_bytes'])}",
         "",
@@ -55,8 +62,13 @@ def write_report(
             "",
             "## 说明",
             "",
-            "这是未启用内存优化的功能基线。KV 逻辑 token、KV 预分配容量和"
-            "进程 RSS 是不同指标，不在报告中相互替代。失败样本保留在原始数据中。",
+            (
+                "本轮已启用至少一个内存优化开关。"
+                if memory_enabled
+                else "这是未启用内存优化的功能基线。"
+            )
+            + "KV 逻辑 token、KV 预分配容量和进程 RSS 是不同指标，不在报告中"
+            "相互替代。失败样本保留在原始数据中。",
             "",
         ]
     )

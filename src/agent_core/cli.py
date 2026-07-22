@@ -342,8 +342,13 @@ def main(argv: list[str] | None = None) -> int:
 
     # Step 7 — ReAct inner subgraph construction (reads from capability_registry)
     try:
+        from agent_core.artifacts.virtualizer import (
+            initialize_artifact_virtualizer,
+        )
+        from agent_core.config import load_memory_config
         from agent_core.graph.react_agent_factory import initialize_react_agent
 
+        initialize_artifact_virtualizer(load_memory_config(args.config))
         initialize_react_agent()
     except Exception as exc:
         telemetry_collector.close()
