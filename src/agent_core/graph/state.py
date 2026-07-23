@@ -39,3 +39,11 @@ class AgentState(TypedDict):
     current_iteration: int
     final_answer: str
     error: dict | None
+    conversation_id: str | None
+    current_user_input: str
+    conversation_context: str
+    pinned_facts: list[dict]
+    context_summary: dict
+    archived_context_ids: list[str]
+    context_version: int
+    lifecycle_stats: dict

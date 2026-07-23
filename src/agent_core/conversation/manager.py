@@ -46,8 +46,25 @@ class ConversationManager:
 
         thread_id = str(uuid.uuid4())
         turn_id = str(uuid.uuid4())
-        history = self._render_history(conversation_id)
-        task_goal = self._compose_goal(history, user_input)
+        from agent_core.memory import get_lifecycle_context_manager
+
+        lifecycle = get_lifecycle_context_manager()
+        historical_turns = [
+            turn
+            for turn in self.store.list_turns(conversation_id)
+            if turn.status != "running" and turn.user_input.strip()
+        ]
+        if lifecycle.enabled:
+            history = lifecycle.select_conversation_context(
+                conversation_id=conversation_id,
+                turns=historical_turns,
+                current_input=user_input,
+                engine=self.engine,
+            )
+            task_goal = user_input
+        else:
+            history = self._render_history(conversation_id)
+            task_goal = self._compose_goal(history, user_input)
         self.store.create_running_turn(
             turn_id=turn_id,
             conversation_id=conversation_id,
@@ -56,7 +73,12 @@ class ConversationManager:
         )
 
         try:
-            _, result = self.runner.start_new_task(task_goal, thread_id=thread_id)
+            _, result = self.runner.start_new_task(
+                task_goal,
+                thread_id=thread_id,
+                conversation_id=conversation_id if lifecycle.enabled else None,
+                conversation_context=history if lifecycle.enabled else "",
+            )
             answer = str(result.get("final_answer", "")).strip()
             status = str(result.get("status", "failed"))
             error = None if status == "done" else self._result_error(result)
@@ -65,6 +87,9 @@ class ConversationManager:
                 status=status,
                 assistant_output=answer,
                 error=error,
+            )
+            lifecycle.record_conversation_turn(
+                conversation_id, turn, self.engine
             )
             return turn, result
         except Exception as exc:

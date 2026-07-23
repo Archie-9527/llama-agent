@@ -115,12 +115,19 @@ def main(argv: list[str] | None = None) -> int:
         os.environ["AGENT_ARTIFACT_STORAGE_DIR"] = str(
             args.output_dir / "artifacts"
         )
+        os.environ["AGENT_MEMORY_CONTEXT_STORE_PATH"] = str(
+            args.output_dir / "context_memory.sqlite"
+        )
         bootstrap_capabilities(load_tools_config(args.config))
         from agent_core.artifacts.virtualizer import (
             initialize_artifact_virtualizer,
         )
 
-        initialize_artifact_virtualizer(load_memory_config(args.config))
+        memory_config = load_memory_config(args.config)
+        initialize_artifact_virtualizer(memory_config)
+        from agent_core.memory import initialize_lifecycle_context
+
+        initialize_lifecycle_context(memory_config)
         initialize_react_agent()
 
         runner_config = app.to_run_config()

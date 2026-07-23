@@ -90,6 +90,14 @@ class BenchmarkRunner:
                 "the config file or with "
                 "AGENT_MEMORY_ARTIFACT_VIRTUALIZATION=true"
             )
+        if self.round_name.upper().startswith("R2") and not (
+            manifest["memory_flags"]["artifact_virtualization"]
+            and manifest["memory_flags"]["lifecycle_context"]
+        ):
+            raise ValueError(
+                "R2 requires memory.artifact_virtualization=true and "
+                "memory.lifecycle_context=true"
+            )
         cases_dir = run_dir / "cases"
         cases_dir.mkdir(parents=True, exist_ok=False)
         _write_json(run_dir / "manifest.json", manifest)
@@ -352,6 +360,29 @@ def _prepare_case(case, sample_dir: Path) -> dict[str, Any]:
     raw = case.to_dict()
     sample_dir.mkdir(parents=True, exist_ok=True)
     replacements: dict[str, str] = {}
+
+    filler_count = int(case.metadata.get("conversation_filler_turns", 0))
+    if filler_count:
+        seed_turn = str(
+            case.metadata.get(
+                "conversation_seed_turn",
+                "记住项目代号是 AgentMem，校验码是 7319，并直接复述。",
+            )
+        )
+        final_turn = str(
+            case.metadata.get(
+                "conversation_final_turn",
+                "综合此前对话，项目代号和校验码分别是什么？",
+            )
+        )
+        raw["turns"] = [
+            seed_turn,
+            *[
+                f"这是上下文压力测试第 {index + 1} 轮。请只回复 ACK-{index + 1}。"
+                for index in range(filler_count)
+            ],
+            final_turn,
+        ]
 
     size = int(case.metadata.get("fixture_size_bytes", 0))
     if size > 0:

@@ -1223,6 +1223,9 @@ class TestArchitectureIsolation:
             "max_iterations", "current_iteration",
             "final_answer",
             "error",
+            "conversation_id", "current_user_input", "conversation_context",
+            "pinned_facts", "context_summary", "archived_context_ids",
+            "context_version", "lifecycle_stats",
         }
         assert set(hints.keys()) == required
 

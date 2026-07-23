@@ -91,6 +91,19 @@ class MemoryConfig:
     artifact_preview_chars: int = 1200
     artifact_summary_chars: int = 600
     lifecycle_context: bool = False
+    context_store_path: Path = Path("data/context_memory.sqlite")
+    context_budget_tokens: int = 12000
+    context_trigger_ratio: float = 0.75
+    context_reserved_generation_tokens: int = 1024
+    hot_execution_records: int = 4
+    hot_conversation_turns: int = 4
+    hot_reflection_notes: int = 2
+    summary_mode: str = "deterministic"
+    summary_trigger_tokens: int = 6000
+    summary_target_chars: int = 800
+    context_retrieval_top_k: int = 3
+    context_retrieval_token_budget: int = 2000
+    checkpoint_compaction: bool = True
     kv_lifecycle: bool = False
     branch_management: bool = False
 
@@ -101,6 +114,28 @@ class MemoryConfig:
             raise ValueError("artifact_preview_chars must be >= 0")
         if self.artifact_summary_chars < 1:
             raise ValueError("artifact_summary_chars must be >= 1")
+        if self.context_budget_tokens < 1:
+            raise ValueError("context_budget_tokens must be >= 1")
+        if not 0 < self.context_trigger_ratio <= 1:
+            raise ValueError("context_trigger_ratio must be in (0, 1]")
+        if self.context_reserved_generation_tokens < 1:
+            raise ValueError("context_reserved_generation_tokens must be >= 1")
+        if self.hot_execution_records < 1:
+            raise ValueError("hot_execution_records must be >= 1")
+        if self.hot_conversation_turns < 1:
+            raise ValueError("hot_conversation_turns must be >= 1")
+        if self.hot_reflection_notes < 1:
+            raise ValueError("hot_reflection_notes must be >= 1")
+        if self.summary_mode != "deterministic":
+            raise ValueError(
+                "summary_mode currently supports only deterministic"
+            )
+        if self.summary_trigger_tokens < 1 or self.summary_target_chars < 1:
+            raise ValueError("summary limits must be positive")
+        if self.context_retrieval_top_k < 0:
+            raise ValueError("context_retrieval_top_k must be >= 0")
+        if self.context_retrieval_token_budget < 0:
+            raise ValueError("context_retrieval_token_budget must be >= 0")
 
 
 # ---------------------------------------------------------------------------
@@ -137,11 +172,24 @@ _MEMORY_FIELD_CASTERS: dict[str, Callable] = {
             "lifecycle_context",
             "kv_lifecycle",
             "branch_management",
+            "checkpoint_compaction",
         )
     },
     "artifact_inline_max_bytes": int,
     "artifact_preview_chars": int,
     "artifact_summary_chars": int,
+    "context_store_path": Path,
+    "context_budget_tokens": int,
+    "context_trigger_ratio": float,
+    "context_reserved_generation_tokens": int,
+    "hot_execution_records": int,
+    "hot_conversation_turns": int,
+    "hot_reflection_notes": int,
+    "summary_mode": str,
+    "summary_trigger_tokens": int,
+    "summary_target_chars": int,
+    "context_retrieval_top_k": int,
+    "context_retrieval_token_budget": int,
 }
 
 _ENGINE_FIELD_CASTERS: dict[str, Callable] = {

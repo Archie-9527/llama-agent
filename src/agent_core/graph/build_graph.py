@@ -49,6 +49,14 @@ _STATE_DEFAULTS: dict[str, Callable[[], object]] = {
     "status": lambda: "planning",
     "final_answer": str,
     "error": lambda: None,
+    "conversation_id": lambda: None,
+    "current_user_input": str,
+    "conversation_context": str,
+    "pinned_facts": list,
+    "context_summary": dict,
+    "archived_context_ids": list,
+    "context_version": lambda: 0,
+    "lifecycle_stats": dict,
 }
 
 
@@ -108,7 +116,12 @@ def _with_error_isolation(
                 from agent_core.telemetry import telemetry_phase
 
                 with telemetry_phase(node_name):
-                    return node_fn(state, config)
+                    result = node_fn(state, config)
+                    from agent_core.memory import get_lifecycle_context_manager
+
+                    return get_lifecycle_context_manager().commit(
+                        result, event=node_name
+                    )
             except AgentCoreError as exc:
                 return _fail_state(state, node_name, exc)
 
@@ -120,7 +133,12 @@ def _with_error_isolation(
             from agent_core.telemetry import telemetry_phase
 
             with telemetry_phase(node_name):
-                return node_fn(state)
+                result = node_fn(state)
+                from agent_core.memory import get_lifecycle_context_manager
+
+                return get_lifecycle_context_manager().commit(
+                    result, event=node_name
+                )
         except AgentCoreError as exc:
             return _fail_state(state, node_name, exc)
 

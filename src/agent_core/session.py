@@ -119,7 +119,13 @@ class TaskRunner:
     # Initial state construction
     # ------------------------------------------------------------------
 
-    def _build_initial_state(self, task_goal: str) -> AgentState:
+    def _build_initial_state(
+        self,
+        task_goal: str,
+        *,
+        conversation_id: str | None = None,
+        conversation_context: str = "",
+    ) -> AgentState:
         """Construct a valid ``AgentState`` from a bare task-goal string.
 
         Every default value is defined here and *only* here — callers
@@ -136,6 +142,14 @@ class TaskRunner:
             status="planning",
             final_answer="",
             error=None,
+            conversation_id=conversation_id,
+            current_user_input=task_goal,
+            conversation_context=conversation_context,
+            pinned_facts=[],
+            context_summary={},
+            archived_context_ids=[],
+            context_version=0,
+            lifecycle_stats={},
         )
 
     # ------------------------------------------------------------------
@@ -143,7 +157,12 @@ class TaskRunner:
     # ------------------------------------------------------------------
 
     def start_new_task(
-        self, task_goal: str, *, thread_id: str | None = None
+        self,
+        task_goal: str,
+        *,
+        thread_id: str | None = None,
+        conversation_id: str | None = None,
+        conversation_context: str = "",
     ) -> tuple[str, AgentState]:
         """Start a brand-new task.
 
@@ -162,7 +181,11 @@ class TaskRunner:
             raise ValueError("task_goal must not be empty")
 
         thread_id = thread_id or str(uuid.uuid4())
-        initial_state = self._build_initial_state(task_goal)
+        initial_state = self._build_initial_state(
+            task_goal,
+            conversation_id=conversation_id,
+            conversation_context=conversation_context,
+        )
         logger.info("Starting new task  thread_id=%s  goal=%r", thread_id, task_goal)
 
         from agent_core.telemetry import get_telemetry, telemetry_task

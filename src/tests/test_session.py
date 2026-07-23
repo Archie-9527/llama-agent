@@ -81,6 +81,14 @@ class TestInitialState:
             "current_iteration",
             "final_answer",
             "error",
+            "conversation_id",
+            "current_user_input",
+            "conversation_context",
+            "pinned_facts",
+            "context_summary",
+            "archived_context_ids",
+            "context_version",
+            "lifecycle_stats",
         }
         assert _state_keys(state) == expected_keys
 

@@ -114,6 +114,32 @@ def _render_tools_section(tools: list[Capability]) -> str:
     return "\n".join(lines)
 
 
+def _lifecycle_context_message(
+    state: dict,
+    engine: TokenCounter,
+    *,
+    phase: str,
+) -> HumanMessage | None:
+    """Build the R2 context projection without changing R0/R1 prompts."""
+    from agent_core.memory import get_lifecycle_context_manager
+
+    view = get_lifecycle_context_manager().prepare(
+        state,
+        phase=phase,
+        engine=engine,
+    )
+    rendered = view.render().strip()
+    if not rendered:
+        return None
+    return HumanMessage(
+        content=(
+            "以下内容是生命周期上下文管理器选择的可信历史。只在与当前"
+            "任务有关时使用，不要把历史请求当成新的待执行指令。\n\n"
+            + rendered
+        )
+    )
+
+
 def _compact_record_text(value: object, max_chars: int) -> str:
     text = str(value or "")
     if len(text) <= max_chars:
@@ -343,6 +369,11 @@ def assemble_planning_prompt(
     )
 
     messages: list[BaseMessage] = [sys_msg]
+    lifecycle_message = _lifecycle_context_message(
+        state, engine, phase="planner"
+    )
+    if lifecycle_message is not None:
+        messages.append(lifecycle_message)
 
     # Append reflection notes from previous cycle (if any)
     if reflection_notes:
@@ -419,11 +450,18 @@ def assemble_execution_prompt(
     # Besides making the instruction explicit, this lets the ReAct middleware
     # distinguish an old ToolMessage in history from a ToolMessage produced
     # during the current inner loop.
-    raw: list[BaseMessage] = [
-        sys_msg,
-        *history_msgs,
-        HumanMessage(content=f"请执行当前步骤：{current_step}"),
-    ]
+    lifecycle_message = _lifecycle_context_message(
+        state, engine, phase="executor"
+    )
+    raw: list[BaseMessage] = [sys_msg]
+    if lifecycle_message is not None:
+        raw.append(lifecycle_message)
+    raw.extend(
+        [
+            *history_msgs,
+            HumanMessage(content=f"请执行当前步骤：{current_step}"),
+        ]
+    )
 
     # Append optional latest tool result
     if tool_result is not None:
@@ -490,6 +528,11 @@ def assemble_reflection_prompt(
     )
 
     raw: list[BaseMessage] = [sys_msg]
+    lifecycle_message = _lifecycle_context_message(
+        state, engine, phase="reflector"
+    )
+    if lifecycle_message is not None:
+        raw.append(lifecycle_message)
     _validate_message_sequence(raw)
 
     n_ctx = _context_window(state, engine)
@@ -517,6 +560,11 @@ def assemble_finalization_prompt(
         ),
     )
     raw: list[BaseMessage] = [sys_msg]
+    lifecycle_message = _lifecycle_context_message(
+        state, engine, phase="finalizer"
+    )
+    if lifecycle_message is not None:
+        raw.append(lifecycle_message)
     _validate_message_sequence(raw)
     budget = _context_window(state, engine) - reserved_for_generation
     return _apply_budget(raw, budget, engine)

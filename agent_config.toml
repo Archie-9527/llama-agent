@@ -135,5 +135,20 @@ artifact_inline_max_bytes = 8192
 artifact_preview_chars = 1200
 artifact_summary_chars = 600
 lifecycle_context = false
+# R2：活动上下文采用 PINNED/HOT/WARM/COLD/DEAD 生命周期管理。
+# Benchmark worker 会把 context_store_path 重定向到每个样本的独立目录。
+context_store_path = "data/context_memory.sqlite"
+context_budget_tokens = 12000
+context_trigger_ratio = 0.75
+context_reserved_generation_tokens = 1024
+hot_execution_records = 4
+hot_conversation_turns = 4
+hot_reflection_notes = 2
+summary_mode = "deterministic"
+summary_trigger_tokens = 6000
+summary_target_chars = 800
+context_retrieval_top_k = 3
+context_retrieval_token_budget = 2000
+checkpoint_compaction = true
 kv_lifecycle = false
 branch_management = false

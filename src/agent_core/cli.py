@@ -349,6 +349,9 @@ def main(argv: list[str] | None = None) -> int:
         from agent_core.graph.react_agent_factory import initialize_react_agent
 
         initialize_artifact_virtualizer(load_memory_config(args.config))
+        from agent_core.memory import initialize_lifecycle_context
+
+        initialize_lifecycle_context(load_memory_config(args.config))
         initialize_react_agent()
     except Exception as exc:
         telemetry_collector.close()

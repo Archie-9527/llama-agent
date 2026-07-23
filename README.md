@@ -2,7 +2,8 @@
 
 基于 `llama-cpp-python`、LangChain 与 LangGraph 的本地工具智能体。当前版本包含
 阶段一功能基线：Plan–Execute–Reflect–Finalize、多轮 Conversation、
-checkpoint/resume、统一遥测，以及隔离进程 Benchmark。
+checkpoint/resume、统一遥测和隔离进程 Benchmark；同时包含 R1 工具输出
+虚拟化与 R2 生命周期感知上下文管理，两项优化均可独立关闭做消融实验。
 
 完整架构、两阶段建设方案和 Benchmark 用例说明见
 [`docs/整体系统设计说明书.md`](docs/整体系统设计说明书.md)。
@@ -164,6 +165,41 @@ llama-agent --config agent_config.toml benchmark \
   --case w4-large-file-16k \
   --case w4-large-file-64k
 ```
+
+## R2 生命周期感知上下文管理
+
+R2 在 R1 之上将上下文分为 PINNED、HOT、WARM、COLD 和 DEAD。当前目标、
+明确记忆和当前计划受到保护；最近执行记录保留原文；较旧执行结果使用确定性
+摘要替换并将原文归档到任务隔离的 `ContextStore`。多轮 Conversation 开启 R2
+后不再把全部历史拼入 `task_goal`，而是选择最近轮、明确要求记住的轮次和与
+当前问题相关的历史。
+
+运行 R1/R2 同用例消融：
+
+```bash
+# R1：只启用 Artifact 虚拟化
+AGENT_MEMORY_ARTIFACT_VIRTUALIZATION=true \
+AGENT_MEMORY_LIFECYCLE_CONTEXT=false \
+AGENT_MEMORY_KV_LIFECYCLE=false \
+AGENT_MEMORY_BRANCH_MANAGEMENT=false \
+llama-agent --config agent_config.toml benchmark \
+  --suite benchmark/workloads/r2_lifecycle_context.json \
+  --output-root benchmark/results \
+  --round R1-lifecycle-ablation
+
+# R2：在相同工作负载上增加生命周期上下文管理
+AGENT_MEMORY_ARTIFACT_VIRTUALIZATION=true \
+AGENT_MEMORY_LIFECYCLE_CONTEXT=true \
+AGENT_MEMORY_KV_LIFECYCLE=false \
+AGENT_MEMORY_BRANCH_MANAGEMENT=false \
+llama-agent --config agent_config.toml benchmark \
+  --suite benchmark/workloads/r2_lifecycle_context.json \
+  --output-root benchmark/results \
+  --round R2-lifecycle-context
+```
+
+R2 报告增加上下文投影前后 token、状态压缩字节、Conversation 召回次数和
+ContextStore 磁盘占用。`R2` round 会拒绝未同时开启 R1 与 R2 的配置。
 
 ## 遥测口径
 

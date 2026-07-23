@@ -1,0 +1,82 @@
+{
+  "name": "r2-lifecycle-context",
+  "seed": 44,
+  "warmup_runs": 1,
+  "measured_runs": 5,
+  "cases": [
+    {
+      "case_id": "r2-conversation-16-turn-recall",
+      "category": "R2-conversation",
+      "expected_status": "done",
+      "expected_contains": ["AgentMem", "7319"],
+      "min_tool_calls": 0,
+      "max_tool_calls": 0,
+      "forbidden_tools": [
+        "execute_shell_command",
+        "read_file",
+        "search_file",
+        "search_log",
+        "query_sqlite"
+      ],
+      "metadata": {
+        "conversation_filler_turns": 14,
+        "conversation_seed_turn": "记住项目代号是 AgentMem，校验码是 7319，并直接复述。",
+        "conversation_final_turn": "综合此前对话，项目代号和校验码分别是什么？"
+      }
+    },
+    {
+      "case_id": "r2-conversation-32-turn-recall",
+      "category": "R2-conversation",
+      "expected_status": "done",
+      "expected_contains": ["AgentMem", "7319"],
+      "min_tool_calls": 0,
+      "max_tool_calls": 0,
+      "forbidden_tools": [
+        "execute_shell_command",
+        "read_file",
+        "search_file",
+        "search_log",
+        "query_sqlite"
+      ],
+      "metadata": {
+        "conversation_filler_turns": 30,
+        "conversation_seed_turn": "记住项目代号是 AgentMem，校验码是 7319，并直接复述。",
+        "conversation_final_turn": "综合此前对话，项目代号和校验码分别是什么？"
+      }
+    },
+    {
+      "case_id": "r2-multistage-local-evidence",
+      "category": "R2-multistage",
+      "goal": "严格执行四步并最终汇总证据：第一步调用 read_file 读取 {config_path}，offset=0，length=4096；第二步调用 search_log 在 {log_path} 搜索 DB_POOL_EXHAUSTED；第三步调用 describe_sqlite_table 查看 {db_path} 中 incidents 表；第四步调用 query_sqlite 对 {db_path} 执行 SELECT request_id, root_cause, runbook FROM incidents WHERE request_id='req-7319'。最终回答 request_id、root_cause、runbook 和 db_pool_size。",
+      "expected_status": "done",
+      "expected_contains": ["req-7319", "connection_pool_exhausted", "RB-2048", "48"],
+      "expected_tool_result_contains": ["req-7319", "connection_pool_exhausted", "RB-2048", "48"],
+      "expected_tools": ["read_file", "search_log", "describe_sqlite_table", "query_sqlite"],
+      "expected_tool_sequence": ["read_file", "search_log", "describe_sqlite_table", "query_sqlite"],
+      "min_tool_calls": 4,
+      "max_tool_calls": 4,
+      "forbidden_tools": ["execute_shell_command", "web_search", "fetch_url"],
+      "metadata": {
+        "incident_fixture": true
+      }
+    },
+    {
+      "case_id": "r2-artifact-middle-evidence-regression",
+      "category": "R2-r1-regression",
+      "goal": "必须严格执行两步：第一步调用 read_file 从 offset=0 读取 {fixture_path}，length=270000；第二步从返回结果取得 artifact_id，并调用 search_artifact 搜索 R2_HIDDEN_EVIDENCE。最后回答 marker、request_id 和 root_cause。",
+      "expected_status": "done",
+      "expected_contains": ["R2_HIDDEN_EVIDENCE", "req-7319", "connection_pool_exhausted"],
+      "expected_tool_result_contains": ["virtualized", "artifact://", "R2_HIDDEN_EVIDENCE"],
+      "expected_tools": ["read_file", "search_artifact"],
+      "expected_tool_sequence": ["read_file", "search_artifact"],
+      "min_tool_calls": 2,
+      "max_tool_calls": 2,
+      "forbidden_tools": ["execute_shell_command", "retrieve_artifact"],
+      "metadata": {
+        "fixture_size_bytes": 262144,
+        "fixture_marker": "R2_HIDDEN_EVIDENCE",
+        "fixture_marker_position": "middle"
+      }
+    }
+  ]
+}
