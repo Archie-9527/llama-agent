@@ -25,6 +25,7 @@ from agent_core.config import (
     load_app_config,
     load_engine_config,
     load_telemetry_config,
+    load_tui_config,
 )
 from agent_core.exceptions import AgentCoreError, AgentEngineError
 from agent_core.llm_engine import EngineConfig, initialize_engine
@@ -46,13 +47,22 @@ EXIT_ENGINE_INIT_ERROR = 4
 # ---------------------------------------------------------------------------
 
 
-def _setup_logging(level: str) -> None:
+def _setup_logging(level: str, *, log_file: Path | None = None) -> None:
     """Configure the root logger.  Invalid level strings silently fall back
-    to ``INFO``."""
+    to ``INFO``.  Full-screen TUI mode writes to a file so log lines cannot
+    corrupt the terminal layout."""
     resolved = getattr(logging, level.upper(), logging.INFO)
+    handlers = None
+    force = False
+    if log_file is not None:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        handlers = [logging.FileHandler(log_file, encoding="utf-8")]
+        force = True
     logging.basicConfig(
         level=resolved,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        handlers=handlers,
+        force=force,
     )
 
 
@@ -110,6 +120,17 @@ def _build_parser() -> argparse.ArgumentParser:
 
     chat_p = subparsers.add_parser("chat", help="Interactive persistent chat")
     chat_p.add_argument("--conversation-id", type=str, default=None)
+
+    tui_p = subparsers.add_parser(
+        "cli", help="Full-screen interactive Agent terminal"
+    )
+    tui_p.add_argument("--conversation-id", type=str, default=None)
+    tui_p.add_argument(
+        "--show-thinking",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Show or hide raw model thinking returned after each inference",
+    )
 
     subparsers.add_parser(
         "list-conversations", help="List persistent conversations"
@@ -191,6 +212,20 @@ def _print_engine_config(config: EngineConfig) -> None:
         print(f"  {field_name} = {getattr(config, field_name)}")
 
 
+def _print_tui_config(config) -> None:
+    print("\nActive interactive CLI config:")
+    for field_name in (
+        "show_thinking",
+        "thinking_max_chars",
+        "show_sidebar",
+        "refresh_interval_ms",
+        "tool_result_preview_chars",
+        "restore_last_conversation",
+        "log_file",
+    ):
+        print(f"  {field_name} = {getattr(config, field_name)}")
+
+
 def _print_result(result: dict) -> None:
     print(f"Final status: {result['status']}")
     print(f"Plan steps: {result['plan_steps']}")
@@ -235,8 +270,22 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Application config load failed: {exc}", file=sys.stderr)
         return EXIT_BUSINESS_ERROR
 
+    tui_config = None
+    if args.command == "cli":
+        try:
+            tui_config = load_tui_config(
+                config_file=args.config,
+                cli_overrides={"show_thinking": args.show_thinking},
+            )
+        except ValueError as exc:
+            print(f"Interactive CLI config error: {exc}", file=sys.stderr)
+            return EXIT_BUSINESS_ERROR
+
     # Step 3 — logging
-    _setup_logging(app_config.log_level)
+    _setup_logging(
+        app_config.log_level,
+        log_file=tui_config.log_file if tui_config is not None else None,
+    )
     logger = logging.getLogger("agent_core.cli")
 
     # Benchmark is a parent-only command.  Each sample loads its own model in
@@ -279,6 +328,7 @@ def main(argv: list[str] | None = None) -> int:
                 cli_overrides=_collect_engine_cli_overrides(args),
             )
             _print_engine_config(engine_config)
+            _print_tui_config(load_tui_config(config_file=args.config))
         except ValueError as exc:
             print(f"\n[Engine config] Load failed: {exc}")
         return EXIT_OK
@@ -348,10 +398,11 @@ def main(argv: list[str] | None = None) -> int:
         from agent_core.config import load_memory_config
         from agent_core.graph.react_agent_factory import initialize_react_agent
 
-        initialize_artifact_virtualizer(load_memory_config(args.config))
+        memory_config = load_memory_config(args.config)
+        initialize_artifact_virtualizer(memory_config)
         from agent_core.memory import initialize_lifecycle_context
 
-        initialize_lifecycle_context(load_memory_config(args.config))
+        initialize_lifecycle_context(memory_config)
         initialize_react_agent()
     except Exception as exc:
         telemetry_collector.close()
@@ -408,7 +459,7 @@ def main(argv: list[str] | None = None) -> int:
             _print_result(result)
             return EXIT_OK
 
-        if args.command in ("continue", "chat"):
+        if args.command in ("continue", "chat", "cli"):
             from agent_core.conversation.manager import (
                 ConversationConfig,
                 ConversationManager,
@@ -426,9 +477,42 @@ def main(argv: list[str] | None = None) -> int:
                     history_token_budget=app_config.conversation_history_token_budget,
                 ),
             )
-            conversation_id = args.conversation_id or _read_last_conversation(
-                app_config.last_conversation_file
+            restore_last = (
+                tui_config.restore_last_conversation
+                if args.command == "cli" and tui_config is not None
+                else True
             )
+            conversation_id = args.conversation_id or (
+                _read_last_conversation(app_config.last_conversation_file)
+                if restore_last
+                else None
+            )
+
+            if args.command == "cli":
+                from agent_core.capability_registry import list_capabilities
+                from agent_core.interactive.session import InteractiveSession
+                from agent_core.tui import discover_skill_names, run_tui
+
+                assert tui_config is not None
+                interactive_session = InteractiveSession(
+                    manager,
+                    conversation_store,
+                    conversation_id=conversation_id,
+                    last_conversation_file=app_config.last_conversation_file,
+                )
+                try:
+                    run_tui(
+                        session=interactive_session,
+                        tui_config=tui_config,
+                        engine_config=engine_config,
+                        memory_config=memory_config,
+                        capabilities=list_capabilities(),
+                        skill_names=discover_skill_names(tools_config),
+                    )
+                except RuntimeError as exc:
+                    print(f"Interactive CLI failed: {exc}", file=sys.stderr)
+                    return EXIT_BUSINESS_ERROR
+                return EXIT_OK
 
             def run_turn(text: str) -> None:
                 nonlocal conversation_id

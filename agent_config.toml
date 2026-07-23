@@ -25,6 +25,21 @@ conversation_history_turns = 8
 conversation_history_token_budget = 4096
 
 # ---------------------------------------------------------------------------
+# 全屏交互式 CLI（llama-agent cli）
+# ---------------------------------------------------------------------------
+[tui]
+# 仅控制是否展示模型返回的原始 Thinking；是否生成 Thinking 仍由
+# engine.disable_thinking 控制。
+show_thinking = false
+thinking_max_chars = 8000
+show_sidebar = true
+refresh_interval_ms = 300
+tool_result_preview_chars = 500
+restore_last_conversation = true
+# TUI 运行时不能向终端直接打印日志，否则会破坏全屏布局。
+log_file = "data/llama-agent-tui.log"
+
+# ---------------------------------------------------------------------------
 # 推理内核配置（映射到 ChatLlamaCpp / llama-cpp-python 构造参数）
 # ---------------------------------------------------------------------------
 [engine]

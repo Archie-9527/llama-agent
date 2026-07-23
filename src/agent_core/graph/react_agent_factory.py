@@ -49,6 +49,13 @@ def _run_capability(cap: Capability, kwargs: dict) -> object:
         normalized_kwargs = {
             key: value for key, value in kwargs.items() if value is not None
         }
+        from agent_core.interactive.events import emit_interactive_event
+
+        emit_interactive_event(
+            "tool_started",
+            tool_name=cap.name,
+            arguments=normalized_kwargs,
+        )
         result = cap.handler(**normalized_kwargs)
         # R1 interception lives at the one boundary shared by every tool.  A
         # disabled policy returns the exact original object, preserving R0.
@@ -56,20 +63,36 @@ def _run_capability(cap: Capability, kwargs: dict) -> object:
 
         inline_result = maybe_virtualize_tool_result(cap.name, result)
     except Exception as exc:
+        from agent_core.interactive.events import emit_interactive_event
+
+        duration_ms = (monotonic_ns() - started) / 1_000_000
+        emit_interactive_event(
+            "tool_failed",
+            tool_name=cap.name,
+            duration_ms=duration_ms,
+            error=f"{type(exc).__name__}: {exc}",
+        )
         telemetry.record_event(
             "tool_events.jsonl",
             "tool_failed",
             tool_name=cap.name,
-            duration_ms=(monotonic_ns() - started) / 1_000_000,
+            duration_ms=duration_ms,
             input_bytes=len(str(kwargs).encode("utf-8")),
             error=f"{type(exc).__name__}: {exc}",
         )
         raise
+    duration_ms = (monotonic_ns() - started) / 1_000_000
+    emit_interactive_event(
+        "tool_completed",
+        tool_name=cap.name,
+        duration_ms=duration_ms,
+        result_preview=str(inline_result)[:2000],
+    )
     telemetry.record_event(
         "tool_events.jsonl",
         "tool_completed",
         tool_name=cap.name,
-        duration_ms=(monotonic_ns() - started) / 1_000_000,
+        duration_ms=duration_ms,
         input_bytes=len(str(kwargs).encode("utf-8")),
         output_bytes=len(str(result).encode("utf-8")),
     )

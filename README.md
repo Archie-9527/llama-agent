@@ -18,6 +18,7 @@ llama-agent run "使用 count_lines 统计 src/agent_core/llm_engine.py 的行�
 llama-agent continue "记住项目代号是 llama-agent"
 llama-agent continue "上一轮的项目代号是什么"
 llama-agent chat
+llama-agent cli
 llama-agent list-conversations
 
 # 恢复中断任务
@@ -29,6 +30,47 @@ llama-agent show-config
 
 每个成功任务都通过 `AgentState.final_answer` 返回统一最终答案；失败任务通过
 `AgentState.error` 返回结构化错误。
+
+### 全屏交互式 CLI
+
+`llama-agent cli` 使用与 `chat` 相同的持久化 Conversation 后端，但提供全屏
+终端界面、运行阶段提示、工具执行卡片，以及 Token、KV、RSS/GPU 内存状态栏。
+模型和 LangGraph 仍使用稳定的同步调用；等待期间界面显示滚动省略号，任务
+完成后一次性展示原始 Thinking（可选）和最终回答。
+
+```bash
+llama-agent --config agent_config.toml cli
+llama-agent --config agent_config.toml cli --conversation-id <id>
+llama-agent --config agent_config.toml cli --show-thinking
+```
+
+常用交互命令：
+
+```text
+/help
+/quit
+/new
+/resume <conversation_id>
+/history
+/conversations
+/tools
+/skills
+/tool <name> <request>
+/skill <name> <request>
+/<capability> <request>
+/thinking on|off
+/stats
+/config
+/clear
+```
+
+`/tool`、`/skill` 和 `/<capability>` 不会绕过 Agent 直接执行本地代码，而是
+把本轮约束为指定能力，继续经过 Tool Schema、LangGraph、Artifact 虚拟化与
+Telemetry。以 `//` 开头可以向模型发送普通的 `/` 文本。
+
+`tui.show_thinking` 只控制展示；只有 `engine.disable_thinking = false` 时，
+Qwen 等模型通常才会实际生成 Thinking。TUI 日志默认写入
+`data/llama-agent-tui.log`，避免日志破坏全屏布局。
 
 Qwen3/Qwen3.5 默认可能生成 `<think>` 推理块。配置中的
 `engine.disable_thinking = true` 会发送 `/no_think` 软开关，同时引擎会把仍然

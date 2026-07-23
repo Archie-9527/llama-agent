@@ -13,6 +13,7 @@ dependencies = [
     "beautifulsoup4>=4.13,<5.0",
     "pyyaml>=6.0,<7.0",
     "psutil==7.2.2",
+    "textual>=1.0,<7.0",
 ]
 [project.optional-dependencies]
 dev = ["pytest", "ruff", "matplotlib"]

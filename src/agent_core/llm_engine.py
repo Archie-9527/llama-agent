@@ -9,6 +9,7 @@ import json
 import re
 import threading
 import uuid
+from dataclasses import asdict, dataclass
 from time import monotonic_ns
 from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Union
 
@@ -28,14 +29,12 @@ from langchain_core.tools import BaseTool
 from pydantic import ConfigDict, Field, PrivateAttr
 
 import llama_cpp
-import llama_cpp.llama_chat_format as llama_chat_format
 
 from agent_core.exceptions import (
     AgentEngineError,
     EngineAlreadyInitializedError,
     EngineConfigError,
     EngineNotInitializedError,
-    InferenceTimeoutError,
     ModelLoadError,
 )
 
@@ -499,6 +498,7 @@ class ChatLlamaCpp(BaseChatModel):
         telemetry = get_telemetry()
         call_started_ns = monotonic_ns()
         lock_wait_started_ns = call_started_ns
+        kv_status = None
         try:
             with self._lock:
                 lock_acquired_ns = monotonic_ns()
@@ -520,6 +520,14 @@ class ChatLlamaCpp(BaseChatModel):
                 inference_finished_ns = monotonic_ns()
                 perf = _read_llama_perf(self._client)
                 telemetry.record_kv(self._client, "inference_after")
+                from agent_core.interactive.events import (
+                    interactive_events_enabled,
+                )
+
+                if interactive_events_enabled():
+                    from agent_core.telemetry.kv_monitor import sample_kv
+
+                    kv_status = sample_kv(self._client).to_dict()
         except AgentEngineError:
             raise  # already our type — don't double-wrap
         except Exception as exc:
@@ -557,6 +565,19 @@ class ChatLlamaCpp(BaseChatModel):
             prompt_eval_tokens=perf.get("prompt_eval_tokens"),
             decode_eval_tokens=perf.get("decode_eval_tokens"),
             ttft_ms=None,
+        )
+        from agent_core.interactive.events import emit_interactive_event
+        from agent_core.telemetry import current_phase
+
+        emit_interactive_event(
+            "inference_completed",
+            phase=current_phase(),
+            reasoning_content=reasoning_content,
+            input_tokens=int(usage.get("prompt_tokens", 0)),
+            output_tokens=int(usage.get("completion_tokens", 0)),
+            total_tokens=int(usage.get("total_tokens", 0)),
+            duration_ms=(inference_finished_ns - lock_acquired_ns) / 1_000_000,
+            kv=kv_status,
         )
         return ChatResult(generations=[ChatGeneration(message=ai_message)])
 
@@ -640,9 +661,6 @@ class ChatLlamaCpp(BaseChatModel):
 # ---------------------------------------------------------------------------
 # [STABLE] EngineConfig — typed contract for ChatLlamaCpp construction
 # ---------------------------------------------------------------------------
-
-from dataclasses import dataclass, asdict
-
 
 @dataclass(frozen=True)
 class EngineConfig:

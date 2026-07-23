@@ -159,6 +159,14 @@ def current_task_id() -> str | None:
         return _collector._active_task_id
 
 
+def current_phase() -> str:
+    phase = _phase_var.get()
+    if phase != "unknown":
+        return phase
+    with _collector._context_lock:
+        return _collector._active_phase
+
+
 @contextlib.contextmanager
 def telemetry_task(task_id: str) -> Iterator[None]:
     collector = get_telemetry()

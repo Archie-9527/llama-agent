@@ -114,15 +114,33 @@ def _with_error_isolation(
         def wrapped(state: AgentState, config) -> AgentState:
             try:
                 from agent_core.telemetry import telemetry_phase
+                from agent_core.interactive.events import emit_interactive_event
 
                 with telemetry_phase(node_name):
+                    emit_interactive_event(
+                        "phase_changed", phase=node_name, status="started"
+                    )
                     result = node_fn(state, config)
                     from agent_core.memory import get_lifecycle_context_manager
 
-                    return get_lifecycle_context_manager().commit(
+                    committed = get_lifecycle_context_manager().commit(
                         result, event=node_name
                     )
+                    emit_interactive_event(
+                        "phase_changed",
+                        phase=node_name,
+                        status="completed",
+                    )
+                    return committed
             except AgentCoreError as exc:
+                from agent_core.interactive.events import emit_interactive_event
+
+                emit_interactive_event(
+                    "phase_changed",
+                    phase=node_name,
+                    status="failed",
+                    error=str(exc),
+                )
                 return _fail_state(state, node_name, exc)
 
         return wrapped
@@ -131,15 +149,33 @@ def _with_error_isolation(
     def wrapped(state: AgentState) -> AgentState:
         try:
             from agent_core.telemetry import telemetry_phase
+            from agent_core.interactive.events import emit_interactive_event
 
             with telemetry_phase(node_name):
+                emit_interactive_event(
+                    "phase_changed", phase=node_name, status="started"
+                )
                 result = node_fn(state)
                 from agent_core.memory import get_lifecycle_context_manager
 
-                return get_lifecycle_context_manager().commit(
+                committed = get_lifecycle_context_manager().commit(
                     result, event=node_name
                 )
+                emit_interactive_event(
+                    "phase_changed",
+                    phase=node_name,
+                    status="completed",
+                )
+                return committed
         except AgentCoreError as exc:
+            from agent_core.interactive.events import emit_interactive_event
+
+            emit_interactive_event(
+                "phase_changed",
+                phase=node_name,
+                status="failed",
+                error=str(exc),
+            )
             return _fail_state(state, node_name, exc)
 
     return wrapped

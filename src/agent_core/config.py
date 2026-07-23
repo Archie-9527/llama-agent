@@ -21,10 +21,13 @@ import logging
 import os
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from agent_core.llm_engine import EngineConfig
 from agent_core.telemetry.models import TelemetryConfig
+
+if TYPE_CHECKING:
+    from agent_core.capabilities.bootstrap import ToolsConfig
 
 try:
     import tomllib
@@ -80,6 +83,32 @@ class AppConfig:
             db_path=self.db_path,
             last_thread_file=self.last_thread_file,
         )
+
+
+@dataclass(frozen=True)
+class TuiConfig:
+    """Interactive terminal UI settings.
+
+    Thinking generation is controlled independently by
+    ``EngineConfig.disable_thinking``.  ``show_thinking`` only decides
+    whether reasoning returned by the model is rendered in the transcript.
+    """
+
+    show_thinking: bool = False
+    thinking_max_chars: int = 8000
+    show_sidebar: bool = True
+    refresh_interval_ms: int = 300
+    tool_result_preview_chars: int = 500
+    restore_last_conversation: bool = True
+    log_file: Path = Path("data/llama-agent-tui.log")
+
+    def validate(self) -> None:
+        if self.thinking_max_chars < 0:
+            raise ValueError("tui.thinking_max_chars must be >= 0")
+        if self.refresh_interval_ms < 100:
+            raise ValueError("tui.refresh_interval_ms must be >= 100")
+        if self.tool_result_preview_chars < 0:
+            raise ValueError("tui.tool_result_preview_chars must be >= 0")
 
 
 @dataclass(frozen=True)
@@ -162,6 +191,17 @@ _TELEMETRY_FIELD_CASTERS: dict[str, Callable] = {
     "collect_kv": lambda v: str(v).strip().lower() in ("1", "true", "yes"),
     "collect_accelerator": lambda v: str(v).strip().lower() in ("1", "true", "yes"),
     "collect_state_size": lambda v: str(v).strip().lower() in ("1", "true", "yes"),
+}
+
+_TUI_FIELD_CASTERS: dict[str, Callable] = {
+    "show_thinking": lambda v: str(v).strip().lower() in ("1", "true", "yes"),
+    "thinking_max_chars": int,
+    "show_sidebar": lambda v: str(v).strip().lower() in ("1", "true", "yes"),
+    "refresh_interval_ms": int,
+    "tool_result_preview_chars": int,
+    "restore_last_conversation": lambda v: str(v).strip().lower()
+    in ("1", "true", "yes"),
+    "log_file": Path,
 }
 
 _MEMORY_FIELD_CASTERS: dict[str, Callable] = {
@@ -407,6 +447,27 @@ def load_telemetry_config(
     if cli_overrides:
         merged.update({k: v for k, v in cli_overrides.items() if v is not None})
     config = replace(TelemetryConfig(), **merged)
+    config.validate()
+    return config
+
+
+def load_tui_config(
+    config_file: Optional[Path] = None,
+    cli_overrides: Optional[dict[str, Any]] = None,
+) -> TuiConfig:
+    """Load ``[tui]`` with ``AGENT_TUI_*`` environment overrides."""
+
+    file_data = _resolve_config_file(config_file)
+    merged = _cast_layer(file_data.get("tui", {}), _TUI_FIELD_CASTERS)
+    merged.update(
+        _cast_layer(
+            _load_env_layer("AGENT_TUI_", _TUI_FIELD_CASTERS),
+            _TUI_FIELD_CASTERS,
+        )
+    )
+    if cli_overrides:
+        merged.update({k: v for k, v in cli_overrides.items() if v is not None})
+    config = replace(TuiConfig(), **merged)
     config.validate()
     return config
 
