@@ -18,7 +18,7 @@ import importlib.metadata
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from agent_core.benchmark.aggregator import aggregate_run
 from agent_core.benchmark.models import BenchmarkSuite
@@ -57,18 +57,43 @@ class BenchmarkRunner:
         output_root: Path = Path("benchmark/results"),
         round_name: str = "R0",
         engine_overrides: dict[str, Any] | None = None,
+        memory_overrides: dict[str, Any] | None = None,
         case_ids: tuple[str, ...] = (),
+        warmup_runs: int | None = None,
+        measured_runs: int | None = None,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self.config_file = config_file.resolve()
         self.suite_file = suite_file.resolve()
         self.output_root = output_root.resolve()
         self.round_name = round_name
         self.engine_overrides = engine_overrides or {}
+        self.memory_overrides = memory_overrides or {}
         self.case_ids = tuple(dict.fromkeys(case_ids))
+        if warmup_runs is not None and warmup_runs < 0:
+            raise ValueError("warmup_runs must be >= 0")
+        if measured_runs is not None and measured_runs < 1:
+            raise ValueError("measured_runs must be >= 1")
+        self.warmup_runs = warmup_runs
+        self.measured_runs = measured_runs
+        self.progress_callback = progress_callback
 
     def run(self) -> Path:
         suite = BenchmarkSuite.load(self.suite_file)
         suite = _filter_suite_cases(suite, self.case_ids)
+        suite = replace(
+            suite,
+            warmup_runs=(
+                suite.warmup_runs
+                if self.warmup_runs is None
+                else self.warmup_runs
+            ),
+            measured_runs=(
+                suite.measured_runs
+                if self.measured_runs is None
+                else self.measured_runs
+            ),
+        )
         run_id = (
             f"{self.round_name}-{suite.name}-"
             f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-"
@@ -101,6 +126,14 @@ class BenchmarkRunner:
         cases_dir = run_dir / "cases"
         cases_dir.mkdir(parents=True, exist_ok=False)
         _write_json(run_dir / "manifest.json", manifest)
+        self._progress(
+            event="run_started",
+            round=self.round_name,
+            run_dir=str(run_dir),
+            case_count=len(suite.cases),
+            total_samples=len(suite.cases)
+            * (suite.warmup_runs + suite.measured_runs),
+        )
 
         failures_path = run_dir / "failures.jsonl"
         results_path = run_dir / "task_results.jsonl"
@@ -108,6 +141,13 @@ class BenchmarkRunner:
         for case in suite.cases:
             for repetition in range(total_runs):
                 measured = repetition >= suite.warmup_runs
+                self._progress(
+                    event="sample_started",
+                    round=self.round_name,
+                    case_id=case.case_id,
+                    repetition=repetition,
+                    measured=measured,
+                )
                 sample_dir = cases_dir / case.case_id / f"rep-{repetition:03d}"
                 sample_dir.mkdir(parents=True)
                 worker_case = _prepare_case(case, sample_dir)
@@ -163,6 +203,16 @@ class BenchmarkRunner:
                             "worker_stderr": completed.stderr[-8000:],
                         },
                     )
+                self._progress(
+                    event="sample_finished",
+                    round=self.round_name,
+                    case_id=case.case_id,
+                    repetition=repetition,
+                    measured=measured,
+                    passed=bool(result.get("evaluation", {}).get("passed")),
+                    status=result.get("status"),
+                    duration_ms=result.get("duration_ms"),
+                )
 
         _consolidate_telemetry(run_dir)
         for expected in (
@@ -177,13 +227,23 @@ class BenchmarkRunner:
         summary = aggregate_run(run_dir)
         _write_json(run_dir / "summary.json", summary)
         write_report(run_dir, manifest, summary)
+        self._progress(
+            event="run_finished",
+            round=self.round_name,
+            run_dir=str(run_dir),
+            passed_count=summary["passed_count"],
+            sample_count=summary["sample_count"],
+        )
         return run_dir
 
     def _manifest(self, run_id: str, suite: BenchmarkSuite) -> dict[str, Any]:
         engine = load_engine_config(
             self.config_file, cli_overrides=self.engine_overrides
         )
-        memory = load_memory_config(self.config_file)
+        memory = load_memory_config(
+            self.config_file,
+            cli_overrides=self.memory_overrides,
+        )
         model_path = Path(engine.model_path)
         return {
             "run_id": run_id,
@@ -232,6 +292,10 @@ class BenchmarkRunner:
                 ),
             },
         }
+
+    def _progress(self, **event: Any) -> None:
+        if self.progress_callback is not None:
+            self.progress_callback(event)
 
 
 def _sha256(path: Path) -> str:

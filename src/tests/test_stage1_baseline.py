@@ -131,6 +131,32 @@ def test_benchmark_conversation_stops_after_first_failed_turn():
     manager.continue_conversation.assert_not_called()
 
 
+def test_benchmark_conversation_propagates_turn_error_when_result_omits_it():
+    manager = MagicMock()
+    failed_turn = Turn(
+        turn_id="t1",
+        conversation_id="c1",
+        thread_id="thread1",
+        turn_index=0,
+        user_input="记住 AgentMem",
+        assistant_output="",
+        status="failed",
+        error="[iteration 0] decision=failed",
+        created_at="now",
+        updated_at="now",
+    )
+    manager.start.return_value = (
+        "c1",
+        failed_turn,
+        {"status": "failed", "error": None},
+    )
+
+    result, _, failed_index = _run_conversation_case(manager, ("记住 AgentMem",))
+
+    assert failed_index == 0
+    assert result["error"] == "[iteration 0] decision=failed"
+
+
 def test_kv_snapshot_falls_back_cleanly():
     class Client:
         n_tokens = 12

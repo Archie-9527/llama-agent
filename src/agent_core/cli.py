@@ -157,6 +157,43 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    # --- fixed-policy R0/R1/R2 ablation ----------------------------------
+    ablation_p = subparsers.add_parser(
+        "ablation",
+        help="Run the same cases under R0, R1 and R2 and compare them",
+    )
+    ablation_p.add_argument(
+        "--suite",
+        type=Path,
+        default=Path("benchmark/workloads/r0_full.json"),
+    )
+    ablation_p.add_argument(
+        "--output-root", type=Path, default=Path("benchmark/results")
+    )
+    ablation_p.add_argument(
+        "--case",
+        dest="case_ids",
+        action="append",
+        default=[],
+        metavar="CASE_ID",
+        help=(
+            "Run only the selected benchmark case_id. Repeat --case to "
+            "select multiple cases."
+        ),
+    )
+    ablation_p.add_argument(
+        "--warmup-runs",
+        type=int,
+        default=None,
+        help="Override Suite warmup count for each round",
+    )
+    ablation_p.add_argument(
+        "--measured-runs",
+        type=int,
+        default=None,
+        help="Override Suite measured repetition count for each round",
+    )
+
     return parser
 
 
@@ -317,6 +354,43 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_BUSINESS_ERROR
         print(f"Benchmark completed: {run_dir}")
         print(f"Report: {run_dir / 'report.md'}")
+        return EXIT_OK
+
+    # The automated ablation is also parent-only.  Its policy matrix is
+    # internal and therefore cannot be accidentally changed by ambient
+    # AGENT_MEMORY_* variables or edits between rounds.
+    if args.command == "ablation":
+        from agent_core.benchmark.ablation import (
+            console_progress,
+            run_r0_r2_ablation,
+        )
+
+        if args.config is not None:
+            config_path = args.config
+        else:
+            from agent_core.config import DEFAULT_CONFIG_SEARCH_PATHS
+
+            config_path = next(
+                (path for path in DEFAULT_CONFIG_SEARCH_PATHS if path.exists()),
+                Path("agent_config.toml"),
+            )
+        try:
+            result = run_r0_r2_ablation(
+                config_file=config_path,
+                suite_file=args.suite,
+                output_root=args.output_root,
+                case_ids=tuple(args.case_ids),
+                engine_overrides=_collect_engine_cli_overrides(args),
+                warmup_runs=args.warmup_runs,
+                measured_runs=args.measured_runs,
+                progress_callback=console_progress,
+            )
+        except Exception as exc:
+            logger.exception("R0-R2 ablation failed")
+            print(f"R0-R2 ablation failed: {exc}", file=sys.stderr)
+            return EXIT_BUSINESS_ERROR
+        print(f"Ablation completed: {result.output_dir}")
+        print(f"Comparison report: {result.report_path}")
         return EXIT_OK
 
     # Step 4 — show-config (must NOT initialise engine or create TaskRunner)

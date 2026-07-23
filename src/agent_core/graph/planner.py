@@ -147,6 +147,54 @@ def _enforce_explicit_tool_sequence(
     return ordered
 
 
+_CONVERSATION_ONLY_PATTERN = re.compile(
+    r"(?:"
+    r"记住|不要忘记|更正|修正为|改为|不再有效|"
+    r"最初.{0,20}(?:是|为)|上一轮|此前|之前告诉|"
+    r"综合此前对话|直接回答|不要再次调用工具|不要调用工具"
+    r")"
+)
+_EXPLICIT_EXTERNAL_OPERATION_PATTERN = re.compile(
+    r"(?:"
+    r"(?:读取|搜索|查询|修改|写入|删除|执行|运行|重启|启动|检查)"
+    r".{0,16}(?:文件|目录|路径|日志|数据库|SQL|命令|脚本|服务|URL)|"
+    r"(?:文件|目录|路径|日志|数据库|SQL|命令|脚本|服务|URL)"
+    r".{0,16}(?:读取|搜索|查询|修改|写入|删除|执行|运行|重启|启动|检查)|"
+    r"(?:/|\.{1,2}/)[A-Za-z0-9_.\-/]+"
+    r")",
+    re.IGNORECASE,
+)
+_NO_TOOL_PATTERN = re.compile(
+    r"(?:不要|无需|禁止|避免|不必)(?:再|再次)?调用(?:任何|外部)?工具"
+)
+
+
+def _is_tool_free_conversation_intent(state: "AgentState") -> bool:
+    """Identify conversation-memory turns that must not acquire tools.
+
+    Explicit tool requests always win.  This guard only handles turns whose
+    language declares, corrects, recalls or summarizes conversation facts.
+    It prevents a local model from turning a fact correction into an invented
+    file edit or service restart.
+    """
+    if not state.get("conversation_id"):
+        return False
+    current_input = str(
+        state.get("current_user_input") or state.get("task_goal", "")
+    ).strip()
+    if not current_input or _explicit_tool_sequence(current_input):
+        return False
+    no_tool_requested = bool(_NO_TOOL_PATTERN.search(current_input))
+    if (
+        _EXPLICIT_EXTERNAL_OPERATION_PATTERN.search(current_input)
+        and not no_tool_requested
+    ):
+        return False
+    return no_tool_requested or bool(
+        _CONVERSATION_ONLY_PATTERN.search(current_input)
+    )
+
+
 # ---------------------------------------------------------------------------
 # [STABLE] planner_node
 # ---------------------------------------------------------------------------
@@ -194,15 +242,21 @@ def planner_node(state: "AgentState") -> "AgentState":
                 f"Plan step {i} is empty or not a string: {step!r}"
             )
 
-    state["plan_steps"] = _enforce_explicit_tool_sequence(
-        str(state.get("task_goal", "")),
-        steps,
-        [
-            str(record["tool_used"])
-            for record in state.get("execution_log", [])
-            if record.get("tool_used")
-        ],
+    current_input = str(
+        state.get("current_user_input") or state.get("task_goal", "")
     )
+    if _is_tool_free_conversation_intent(state):
+        state["plan_steps"] = [f"直接处理当前会话请求：{current_input}"]
+    else:
+        state["plan_steps"] = _enforce_explicit_tool_sequence(
+            current_input,
+            steps,
+            [
+                str(record["tool_used"])
+                for record in state.get("execution_log", [])
+                if record.get("tool_used")
+            ],
+        )
     state["current_step_index"] = 0
     state["status"] = "executing"
 

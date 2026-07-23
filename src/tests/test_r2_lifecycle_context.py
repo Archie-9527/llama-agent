@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,7 +17,6 @@ from agent_core.conversation.manager import ConversationManager
 from agent_core.conversation.store import ConversationStore
 from agent_core.memory.context_manager import (
     _reset_lifecycle_context_for_testing,
-    get_lifecycle_context_manager,
     initialize_lifecycle_context,
 )
 from agent_core.memory.models import Lifecycle
@@ -222,10 +222,93 @@ def test_conversation_manager_passes_history_separately_in_r2(tmp_path: Path):
     manager.continue_conversation(conversation_id, "上一轮的项目代号是什么？")
 
     second = runner.start_new_task.call_args_list[1]
-    assert second.args[0] == "上一轮的项目代号是什么？"
+    assert "[当前用户请求]" in second.args[0]
+    assert "上一轮的项目代号是什么？" in second.args[0]
+    assert second.kwargs["current_user_input"] == "上一轮的项目代号是什么？"
     assert "AgentMem" in second.kwargs["conversation_context"]
     assert second.kwargs["conversation_id"] == conversation_id
     store.close()
+
+
+def test_small_multistage_evidence_remains_inline_without_pressure(
+    tmp_path: Path,
+):
+    manager = initialize_lifecycle_context(
+        _enabled_config(
+            tmp_path,
+            hot_execution_records=4,
+            summary_trigger_tokens=6000,
+        )
+    )
+    state = {
+        "task_goal": "调查故障",
+        "current_user_input": "调查故障",
+        "execution_log": [
+            {
+                "step": f"step-{index}",
+                "tool_used": "search_log",
+                "result": json.dumps(
+                    {
+                        "success": True,
+                        "matches": [
+                            {
+                                "request_id": "req-7319",
+                                "event": "POOL_RECOVERED",
+                            }
+                        ],
+                    }
+                ),
+            }
+            for index in range(4)
+        ],
+        "reflection_notes": [],
+        "pinned_facts": [],
+        "context_summary": {},
+        "archived_context_ids": [],
+        "lifecycle_stats": {},
+    }
+
+    manager.commit(state, event="executor")
+
+    assert not any(
+        record.get("_r2_compacted") for record in state["execution_log"]
+    )
+    assert all("req-7319" in record["result"] for record in state["execution_log"])
+
+
+def test_compacted_structured_evidence_keeps_matches_and_rows(tmp_path: Path):
+    manager = initialize_lifecycle_context(
+        _enabled_config(tmp_path, summary_target_chars=500)
+    )
+    record = {
+        "step": "汇总多工具证据",
+        "tool_used": "query_sqlite",
+        "result": json.dumps(
+            {
+                "success": True,
+                "matches": [
+                    {
+                        "request_id": "req-7319",
+                        "event": "POOL_RECOVERED",
+                    }
+                ],
+                "rows": [
+                    {
+                        "request_id": "req-7319",
+                        "root_cause": "connection_pool_exhausted",
+                        "runbook": "RB-2048",
+                    }
+                ],
+            }
+        ),
+    }
+
+    summary = manager._summarize_record(record)
+
+    assert "req-7319" in summary
+    assert "POOL_RECOVERED" in summary
+    assert "connection_pool_exhausted" in summary
+    assert "RB-2048" in summary
 
 
 def test_r2_workload_generates_requested_conversation_lengths(tmp_path: Path):
@@ -269,10 +352,10 @@ def test_aggregator_reports_r2_lifecycle_metrics(tmp_path: Path):
             "sample": "rep-000",
             "event": "context_recalled",
             "recalled_count": 2,
+            "selected_turn_count": 4,
+            "recalled_tokens": 123,
         },
     ]
-    import json
-
     (tmp_path / "lifecycle_events.jsonl").write_text(
         "\n".join(json.dumps(event) for event in events) + "\n",
         encoding="utf-8",
@@ -289,4 +372,6 @@ def test_aggregator_reports_r2_lifecycle_metrics(tmp_path: Path):
     assert summary["context_reduction_ratio"] == pytest.approx(0.6)
     assert summary["context_compaction_bytes_saved"] == 3000
     assert summary["context_recalled_turns"] == 2
+    assert summary["context_selected_turns"] == 4
+    assert summary["context_recalled_tokens"] == 123
     assert summary["context_storage_bytes"] == 7

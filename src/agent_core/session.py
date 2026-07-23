@@ -125,6 +125,7 @@ class TaskRunner:
         *,
         conversation_id: str | None = None,
         conversation_context: str = "",
+        current_user_input: str | None = None,
     ) -> AgentState:
         """Construct a valid ``AgentState`` from a bare task-goal string.
 
@@ -143,7 +144,7 @@ class TaskRunner:
             final_answer="",
             error=None,
             conversation_id=conversation_id,
-            current_user_input=task_goal,
+            current_user_input=current_user_input or task_goal,
             conversation_context=conversation_context,
             pinned_facts=[],
             context_summary={},
@@ -163,6 +164,7 @@ class TaskRunner:
         thread_id: str | None = None,
         conversation_id: str | None = None,
         conversation_context: str = "",
+        current_user_input: str | None = None,
     ) -> tuple[str, AgentState]:
         """Start a brand-new task.
 
@@ -185,6 +187,7 @@ class TaskRunner:
             task_goal,
             conversation_id=conversation_id,
             conversation_context=conversation_context,
+            current_user_input=current_user_input,
         )
         logger.info("Starting new task  thread_id=%s  goal=%r", thread_id, task_goal)
 

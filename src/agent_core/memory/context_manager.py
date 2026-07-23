@@ -14,7 +14,19 @@ from agent_core.config import MemoryConfig
 from agent_core.memory.models import ContextView, Lifecycle
 from agent_core.memory.store import ContextStore
 
-_PIN_MARKERS = ("记住", "不要忘记", "以后", "代号是", "校验码是", "偏好是")
+_PIN_MARKERS = (
+    "记住",
+    "不要忘记",
+    "以后",
+    "代号是",
+    "校验码是",
+    "偏好是",
+    "最初",
+    "更正",
+    "修正为",
+    "改为",
+    "不再有效",
+)
 _ARTIFACT_PATTERN = re.compile(r"artifact://[0-9a-fA-F]+")
 _TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_\-]+|[\u4e00-\u9fff]")
 
@@ -290,10 +302,24 @@ class LifecycleContextManager:
         active_tokens = sum(
             _approx_tokens(str(record.get("result", ""))) for record in records
         )
-        if active_tokens > pressure_threshold and len(records) > 1:
+        under_pressure = active_tokens > pressure_threshold
+        if under_pressure and len(records) > 1:
             # Under token pressure retain only the newest record verbatim;
             # every older record remains recoverable through ContextStore.
             compact_until = max(compact_until, len(records) - 1)
+        elif len(records) <= hot * 2:
+            # A small multi-stage task does not benefit from moving a few
+            # hundred bytes into SQLite and replacing them with memory refs.
+            # Keep one extra HOT/WARM generation so structured evidence
+            # remains directly auditable by the finalizer and benchmark.
+            warm_until = max(0, len(records) - hot)
+            for index, record in enumerate(records):
+                record["lifecycle"] = (
+                    Lifecycle.WARM.value
+                    if index < warm_until
+                    else Lifecycle.HOT.value
+                )
+            return
         warm_from = max(0, len(records) - hot * 2)
         archived = state.setdefault("archived_context_ids", [])
         summary = state.setdefault("context_summary", {})
@@ -415,12 +441,46 @@ class LifecycleContextManager:
                 if key not in {"content", "stdout", "stderr", "rows", "matches", "data"}
                 and (value is None or isinstance(value, (str, int, float, bool)))
             }
-            if small:
+            evidence: dict[str, Any] = {}
+            for key in ("matches", "rows", "data"):
+                value = parsed.get(key)
+                if value not in (None, "", [], {}):
+                    evidence[key] = self._bounded_json_value(value)
+            preview_chars = max(128, self.config.summary_target_chars // 2)
+            for key in ("content", "stdout", "stderr"):
+                value = str(parsed.get(key) or "").strip()
+                if value:
+                    evidence[f"{key}_preview"] = _clip(value, preview_chars)
+            if small or evidence:
                 return _clip(
-                    json.dumps(small, ensure_ascii=False, default=str),
+                    json.dumps(
+                        {**small, **evidence},
+                        ensure_ascii=False,
+                        default=str,
+                    ),
                     self.config.summary_target_chars,
                 )
         return _clip(result, self.config.summary_target_chars)
+
+    @staticmethod
+    def _bounded_json_value(value: Any) -> Any:
+        """Retain semantic evidence while bounding large collections."""
+        if isinstance(value, list):
+            if len(value) <= 4:
+                return value
+            return {
+                "count": len(value),
+                "head": value[:2],
+                "tail": value[-2:],
+            }
+        if isinstance(value, dict):
+            scalar = {
+                key: item
+                for key, item in value.items()
+                if item is None or isinstance(item, (str, int, float, bool))
+            }
+            return scalar or {"keys": list(value)[:20]}
+        return value
 
     @staticmethod
     def _render_summary(summary: dict) -> str:

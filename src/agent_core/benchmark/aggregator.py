@@ -220,6 +220,12 @@ def aggregate_run(run_dir: Path) -> dict[str, Any]:
         "context_recalled_turns": sum(
             int(item.get("recalled_count", 0)) for item in recall_events
         ),
+        "context_selected_turns": sum(
+            int(item.get("selected_turn_count", 0)) for item in recall_events
+        ),
+        "context_recalled_tokens": sum(
+            int(item.get("recalled_tokens", 0)) for item in recall_events
+        ),
         "categories": by_category,
     }
 

@@ -20,7 +20,10 @@ from agent_core.benchmark.models import BenchmarkSuite
 from agent_core.benchmark.runner import _prepare_case, _worker_environment
 from agent_core.capability_registry import Capability
 from agent_core.config import MemoryConfig, load_memory_config
-from agent_core.graph.planner import _enforce_explicit_tool_sequence
+from agent_core.graph.planner import (
+    _enforce_explicit_tool_sequence,
+    _is_tool_free_conversation_intent,
+)
 from agent_core.graph.react_agent_factory import _run_capability
 from agent_core.telemetry import telemetry_task
 
@@ -45,6 +48,33 @@ def test_disabled_virtualizer_preserves_r0_result_identity(tmp_path: Path):
     result = {"success": True, "content": "x" * 10_000}
 
     assert maybe_virtualize_tool_result("read_file", result) is result
+
+
+def test_conversation_history_does_not_replay_an_old_tool_instruction():
+    state = {
+        "conversation_id": "conversation-1",
+        "task_goal": (
+            "[历史第 1 轮]\n用户：使用 search_log 搜索日志\n"
+            "[当前用户请求]\n不要再次调用工具，直接回答日志证据"
+        ),
+        "current_user_input": "不要再次调用工具，直接回答日志证据",
+    }
+
+    assert _is_tool_free_conversation_intent(state) is True
+    assert _enforce_explicit_tool_sequence(
+        state["current_user_input"],
+        ["直接回答日志证据"],
+    ) == ["直接回答日志证据"]
+
+
+def test_conversation_guard_does_not_block_an_explicit_file_operation():
+    state = {
+        "conversation_id": "conversation-1",
+        "task_goal": "读取配置文件后直接回答当前端口",
+        "current_user_input": "读取配置文件后直接回答当前端口",
+    }
+
+    assert _is_tool_free_conversation_intent(state) is False
 
 
 def test_large_result_is_externalized_and_retrievable(tmp_path: Path):

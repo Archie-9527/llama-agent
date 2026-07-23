@@ -91,6 +91,29 @@ def test_benchmark_parser_accepts_repeated_case_filters():
     ]
 
 
+def test_ablation_parser_accepts_repeated_case_filters():
+    args = _build_parser().parse_args(
+        [
+            "ablation",
+            "--case",
+            "w4-large-file-16k",
+            "--case",
+            "w7-eight-turn-memory",
+            "--warmup-runs",
+            "0",
+            "--measured-runs",
+            "1",
+        ]
+    )
+    assert args.suite == Path("benchmark/workloads/r0_full.json")
+    assert args.case_ids == [
+        "w4-large-file-16k",
+        "w7-eight-turn-memory",
+    ]
+    assert args.warmup_runs == 0
+    assert args.measured_runs == 1
+
+
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
 

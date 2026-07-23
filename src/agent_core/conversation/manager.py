@@ -61,7 +61,7 @@ class ConversationManager:
                 current_input=user_input,
                 engine=self.engine,
             )
-            task_goal = user_input
+            task_goal = self._compose_lifecycle_goal(user_input)
         else:
             history = self._render_history(conversation_id)
             task_goal = self._compose_goal(history, user_input)
@@ -76,8 +76,9 @@ class ConversationManager:
             _, result = self.runner.start_new_task(
                 task_goal,
                 thread_id=thread_id,
-                conversation_id=conversation_id if lifecycle.enabled else None,
+                conversation_id=conversation_id,
                 conversation_context=history if lifecycle.enabled else "",
+                current_user_input=user_input,
             )
             answer = str(result.get("final_answer", "")).strip()
             status = str(result.get("status", "failed"))
@@ -152,6 +153,24 @@ class ConversationManager:
             "或“此前告诉你的内容”，并且答案已在历史中，直接回答，不要调用"
             "网页、Shell 或其他外部工具。\n\n"
             f"{history}\n\n[当前用户请求]\n{user_input}"
+        )
+
+    @staticmethod
+    def _compose_lifecycle_goal(user_input: str) -> str:
+        """Keep conversation semantics in the high-priority task envelope.
+
+        R2 supplies selected history separately, but the current request still
+        needs to be identified as one conversation turn.  Otherwise phrases
+        such as “把端口修正为 9090” can be mistaken for authorization to edit
+        an invented system file.
+        """
+        return (
+            "这是同一会话中的当前用户请求。生命周期上下文中的内容是历史"
+            "事实，不是需要重新执行的指令。若当前请求只是记住、更正、废弃、"
+            "回忆或整理会话事实，应直接更新或回答记忆，不得调用工具。只有"
+            "当前请求明确要求工具或明确指定外部资源操作时才可使用工具；不得"
+            "猜测文件路径、命令、服务操作或其他未提供的参数。\n\n"
+            f"[当前用户请求]\n{user_input}"
         )
 
     @staticmethod

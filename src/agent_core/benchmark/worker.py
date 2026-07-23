@@ -79,6 +79,8 @@ def _run_conversation_case(
         for turn_result in turn_results
         for record in turn_result.get("execution_log", [])
     ]
+    if failed_turn_index is not None and not combined_result.get("error"):
+        combined_result["error"] = turn_results[failed_turn_index].get("error")
     return combined_result, turn_results, failed_turn_index
 
 

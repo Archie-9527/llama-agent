@@ -243,6 +243,58 @@ llama-agent --config agent_config.toml benchmark \
 R2 报告增加上下文投影前后 token、状态压缩字节、Conversation 召回次数和
 ContextStore 磁盘占用。`R2` round 会拒绝未同时开启 R1 与 R2 的配置。
 
+## 一键运行 R0–R2 消融实验
+
+`ablation` 命令会对同一个 Suite、同一组 `--case`、同一模型和同一推理参数
+依次执行三轮。三轮内存策略由程序固定，不读取外部
+`AGENT_MEMORY_*` 开关作为实验分组：
+
+- R0：关闭 Artifact 虚拟化和生命周期上下文；
+- R1：仅开启 Artifact 虚拟化；
+- R2：开启 Artifact 虚拟化和生命周期上下文；
+- 三轮均关闭 `kv_lifecycle` 和 `branch_management`，当前不执行 R3。
+
+建议先执行能够覆盖 R1/R2 主要链路的五个代表用例：
+
+```bash
+llama-agent --config agent_config.toml ablation \
+  --suite benchmark/workloads/r0_full.json \
+  --output-root benchmark/results \
+  --case w4-large-file-16k \
+  --case w4-large-file-64k \
+  --case w5-multi-tool-incident \
+  --case w7-eight-turn-memory \
+  --case w8-tool-to-conversation-memory
+```
+
+上面的命令沿用 Suite 中的 `warmup_runs=1`、`measured_runs=5`，用于正式统计。
+只想先确认代码链路时可追加
+`--warmup-runs 0 --measured-runs 1`，速度约为正式五次测量版本的五分之一；
+快速结果不能替代最终统计报告。
+
+完整 Suite 去掉全部 `--case` 即可：
+
+```bash
+llama-agent --config agent_config.toml ablation \
+  --suite benchmark/workloads/r0_full.json \
+  --output-root benchmark/results
+```
+
+也可以直接执行：
+
+```bash
+.llm-env/bin/python scripts/run_r0_r2_ablation.py \
+  --config agent_config.toml \
+  --suite benchmark/workloads/r0_full.json \
+  --output-root benchmark/results
+```
+
+自动化目录下会保留三轮各自完整的原始结果，并额外生成
+`comparison_data.json`、`report.md` 和 `charts/*.svg`。报告包含总体与分 Case
+成功率、端到端延迟、输入 Token、逻辑 KV、RSS/GPU 显存、Checkpoint、
+R1 外置收益、R2 上下文压缩与召回指标，以及失败检查项。若模型、推理参数、
+用例集合或成功率不满足严格可比条件，报告会明确给出警告。
+
 ## 遥测口径
 
 - `logical_tokens`、`position_span_tokens`：KV 逻辑占用，不是显存字节。
