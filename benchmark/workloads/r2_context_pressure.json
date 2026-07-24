@@ -1,0 +1,64 @@
+{
+  "name": "r2-context-pressure",
+  "seed": 45,
+  "warmup_runs": 0,
+  "measured_runs": 3,
+  "cases": [
+    {
+      "case_id": "r2-accumulated-medium-tool-results",
+      "category": "R2-accumulated-context",
+      "goal": "必须严格按下列顺序完成 6 个读取操作，不得使用其他工具，也不得省略任何文件：1) 调用 read_file，file_path='{medium_file_0}', offset=0, length=6000；2) 调用 read_file，file_path='{medium_file_1}', offset=0, length=6000；3) 调用 read_file，file_path='{medium_file_2}', offset=0, length=6000；4) 调用 read_file，file_path='{medium_file_3}', offset=0, length=6000；5) 调用 read_file，file_path='{medium_file_4}', offset=0, length=6000；6) 调用 read_file，file_path='{medium_file_5}', offset=0, length=6000。读取完成后，按文件顺序列出每个 FINAL_EVIDENCE 中的 marker。不要根据文件名猜测，答案必须来自真实工具结果。",
+      "expected_status": "done",
+      "expected_contains": [
+        "R2-EVIDENCE-00",
+        "R2-EVIDENCE-01",
+        "R2-EVIDENCE-02",
+        "R2-EVIDENCE-03",
+        "R2-EVIDENCE-04",
+        "R2-EVIDENCE-05"
+      ],
+      "expected_tool_result_contains": [
+        "R2-EVIDENCE-00",
+        "R2-EVIDENCE-01",
+        "R2-EVIDENCE-02",
+        "R2-EVIDENCE-03",
+        "R2-EVIDENCE-04",
+        "R2-EVIDENCE-05"
+      ],
+      "expected_tools": [
+        "read_file"
+      ],
+      "expected_tool_sequence": [
+        "read_file",
+        "read_file",
+        "read_file",
+        "read_file",
+        "read_file",
+        "read_file"
+      ],
+      "forbidden_tools": [
+        "execute_shell_command",
+        "search_file",
+        "get_file_metadata",
+        "get_artifact_summary",
+        "retrieve_artifact",
+        "search_artifact"
+      ],
+      "min_tool_calls": 6,
+      "max_tool_calls": 6,
+      "metadata": {
+        "purpose": "Six individually sub-threshold tool results accumulate enough context to trigger R2 ROI-based compaction while R1 artifact virtualization remains inactive.",
+        "medium_file_fixture_count": 6,
+        "medium_file_size_bytes": 6000,
+        "medium_file_markers": [
+          "R2-EVIDENCE-00",
+          "R2-EVIDENCE-01",
+          "R2-EVIDENCE-02",
+          "R2-EVIDENCE-03",
+          "R2-EVIDENCE-04",
+          "R2-EVIDENCE-05"
+        ]
+      }
+    }
+  ]
+}

@@ -122,8 +122,11 @@ class MemoryConfig:
     lifecycle_context: bool = False
     context_store_path: Path = Path("data/context_memory.sqlite")
     context_budget_tokens: int = 12000
+    context_activation_tokens: int = 2048
     context_trigger_ratio: float = 0.75
     context_reserved_generation_tokens: int = 1024
+    context_min_compaction_bytes: int = 2048
+    context_min_compaction_ratio: float = 0.30
     hot_execution_records: int = 4
     hot_conversation_turns: int = 4
     hot_reflection_notes: int = 2
@@ -145,10 +148,18 @@ class MemoryConfig:
             raise ValueError("artifact_summary_chars must be >= 1")
         if self.context_budget_tokens < 1:
             raise ValueError("context_budget_tokens must be >= 1")
+        if self.context_activation_tokens < 1:
+            raise ValueError("context_activation_tokens must be >= 1")
         if not 0 < self.context_trigger_ratio <= 1:
             raise ValueError("context_trigger_ratio must be in (0, 1]")
         if self.context_reserved_generation_tokens < 1:
             raise ValueError("context_reserved_generation_tokens must be >= 1")
+        if self.context_min_compaction_bytes < 1:
+            raise ValueError("context_min_compaction_bytes must be >= 1")
+        if not 0 < self.context_min_compaction_ratio < 1:
+            raise ValueError(
+                "context_min_compaction_ratio must be in (0, 1)"
+            )
         if self.hot_execution_records < 1:
             raise ValueError("hot_execution_records must be >= 1")
         if self.hot_conversation_turns < 1:
@@ -220,8 +231,11 @@ _MEMORY_FIELD_CASTERS: dict[str, Callable] = {
     "artifact_summary_chars": int,
     "context_store_path": Path,
     "context_budget_tokens": int,
+    "context_activation_tokens": int,
     "context_trigger_ratio": float,
     "context_reserved_generation_tokens": int,
+    "context_min_compaction_bytes": int,
+    "context_min_compaction_ratio": float,
     "hot_execution_records": int,
     "hot_conversation_turns": int,
     "hot_reflection_notes": int,
@@ -244,6 +258,7 @@ _ENGINE_FIELD_CASTERS: dict[str, Callable] = {
     "top_k": int,
     "repeat_penalty": float,
     "max_tokens": int,
+    "seed": int,
     "verbose": lambda v: str(v).strip().lower() in ("1", "true", "yes"),
     "request_timeout": float,
     "disable_thinking": lambda v: str(v).strip().lower() in ("1", "true", "yes"),

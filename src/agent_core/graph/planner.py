@@ -151,7 +151,7 @@ _CONVERSATION_ONLY_PATTERN = re.compile(
     r"(?:"
     r"记住|不要忘记|更正|修正为|改为|不再有效|"
     r"最初.{0,20}(?:是|为)|上一轮|此前|之前告诉|"
-    r"综合此前对话|直接回答|不要再次调用工具|不要调用工具"
+    r"综合此前对话|直接回答|只回复|不要再次调用工具|不要调用工具"
     r")"
 )
 _EXPLICIT_EXTERNAL_OPERATION_PATTERN = re.compile(
@@ -217,6 +217,18 @@ def planner_node(state: "AgentState") -> "AgentState":
         PlanningError: If the LLM output cannot be parsed as a valid plan
             (malformed JSON, missing ``steps`` key, or empty step list).
     """
+    current_input = str(
+        state.get("current_user_input") or state.get("task_goal", "")
+    )
+    # Conversation-only turns do not need a model-generated execution plan.
+    # Short-circuit before get_engine()/invoke so R2 memory conversations do
+    # not pay for a redundant Planner inference that is discarded below.
+    if _is_tool_free_conversation_intent(state):
+        state["plan_steps"] = [f"直接处理当前会话请求：{current_input}"]
+        state["current_step_index"] = 0
+        state["status"] = "executing"
+        return state
+
     engine = get_engine()
     messages = assemble_planning_prompt(state, engine)
     grammar = build_json_grammar(PLAN_SCHEMA)
@@ -242,21 +254,15 @@ def planner_node(state: "AgentState") -> "AgentState":
                 f"Plan step {i} is empty or not a string: {step!r}"
             )
 
-    current_input = str(
-        state.get("current_user_input") or state.get("task_goal", "")
+    state["plan_steps"] = _enforce_explicit_tool_sequence(
+        current_input,
+        steps,
+        [
+            str(record["tool_used"])
+            for record in state.get("execution_log", [])
+            if record.get("tool_used")
+        ],
     )
-    if _is_tool_free_conversation_intent(state):
-        state["plan_steps"] = [f"直接处理当前会话请求：{current_input}"]
-    else:
-        state["plan_steps"] = _enforce_explicit_tool_sequence(
-            current_input,
-            steps,
-            [
-                str(record["tool_used"])
-                for record in state.get("execution_log", [])
-                if record.get("tool_used")
-            ],
-        )
     state["current_step_index"] = 0
     state["status"] = "executing"
 

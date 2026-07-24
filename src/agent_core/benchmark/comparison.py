@@ -104,6 +104,15 @@ def _comparison_warnings(
         warnings.append(
             "至少一轮运行时工作区不是干净状态；正式报告应在固定 commit 上重跑。"
         )
+    source_hashes = {
+        manifest.get("environment", {}).get("source_tree_sha256")
+        for manifest in manifests.values()
+        if manifest.get("environment", {}).get("source_tree_sha256")
+    }
+    if len(source_hashes) > 1:
+        warnings.append(
+            "R0/R1/R2 的源码树指纹不一致，三轮不是同一份实现，不能严格对比。"
+        )
     for previous, current in (("R0", "R1"), ("R1", "R2")):
         if (
             summaries[current]["task_success_rate"]
@@ -317,6 +326,16 @@ def _report_lines(
                 summaries,
                 lambda item: _mib(item["checkpoint_bytes"]),
             ),
+            _summary_row(
+                "持久化存储总量",
+                summaries,
+                lambda item: _mib(
+                    item.get(
+                        "total_persistent_storage_bytes",
+                        item["checkpoint_bytes"],
+                    )
+                ),
+            ),
             "",
             "![任务成功率](charts/success_rate.svg)",
             "",
@@ -443,6 +462,18 @@ def _report_lines(
                 "状态压缩减少字节",
                 summaries,
                 lambda item: f"{item['context_compaction_bytes_saved']:,}",
+            ),
+            _summary_row(
+                "收益不足跳过记录",
+                summaries,
+                lambda item: str(
+                    item.get("context_compaction_skipped_count", 0)
+                ),
+            ),
+            _summary_row(
+                "被压缩原文总量",
+                summaries,
+                lambda item: f"{item.get('context_compaction_source_bytes', 0):,}",
             ),
             _summary_row(
                 "额外召回历史轮数",

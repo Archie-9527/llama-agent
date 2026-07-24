@@ -112,7 +112,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         collector = initialize_telemetry(telemetry_config)
         collector.record_process()
-        initialize_engine(load_engine_config(args.config))
+        initialize_engine(
+            load_engine_config(args.config, {"seed": args.seed})
+        )
         collector.record_process()
         os.environ["AGENT_ARTIFACT_STORAGE_DIR"] = str(
             args.output_dir / "artifacts"
@@ -187,6 +189,7 @@ def main(argv: list[str] | None = None) -> int:
         payload = {
             "case_id": case.case_id,
             "category": case.category,
+            "seed": args.seed,
             "status": result.get("status"),
             "final_answer": result.get("final_answer", ""),
             "duration_ms": duration_ms,
@@ -206,6 +209,7 @@ def main(argv: list[str] | None = None) -> int:
         payload = {
             "case_id": case.case_id,
             "category": case.category,
+            "seed": args.seed,
             "status": "worker_failed",
             "final_answer": "",
             "duration_ms": (monotonic_ns() - started) / 1_000_000,

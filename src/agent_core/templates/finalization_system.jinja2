@@ -3,15 +3,16 @@
 用户任务：
 {{ task_goal }}
 
-执行计划：
-{% for step in plan_steps %}
-- {{ step }}
+模型阶段结论（仅供参考，可能含推断，不得覆盖工具证据）：
+{% for record in model_summaries %}
+- 步骤：{{ record.step }}
+  结果：{{ record.result }}
 {% endfor %}
 
-真实执行记录：
-{% for record in execution_log %}
+真实工具证据（事实优先级最高）：
+{% for record in tool_evidence %}
 - 步骤：{{ record.step }}
-  {% if record.tool_used %}工具：{{ record.tool_used }}{% else %}类型：步骤结论{% endif %}
+  工具：{{ record.tool_used }}
   结果：{{ record.result }}
 {% endfor %}
 
@@ -20,3 +21,5 @@
 2. 不要调用工具，不要输出工具协议、JSON 调用或 functions.<name>:。
 3. 不要虚构执行记录中不存在的事实。
 4. 如果记录含错误或不确定性，应在答案中明确说明。
+5. 计划和模型阶段结论都不是事实来源；两者与真实工具证据冲突时，
+   必须采用真实工具证据中的路径、数值、状态和查询结果。

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 from agent_core.capabilities.base import (
@@ -53,7 +52,7 @@ class FileCapabilityProvider(CapabilityProvider):
                 return json.dumps(
                     {
                         "success": True,
-                        "path": str(path),
+                        "path": file_path,
                         "is_file": path.is_file(),
                         "is_directory": path.is_dir(),
                         "size_bytes": stat.st_size,
@@ -82,7 +81,7 @@ class FileCapabilityProvider(CapabilityProvider):
                 return json.dumps(
                     {
                         "success": True,
-                        "path": str(path),
+                        "path": file_path,
                         "offset": offset,
                         "length": len(chunk),
                         "total_chars": len(text),
@@ -115,7 +114,7 @@ class FileCapabilityProvider(CapabilityProvider):
                 return json.dumps(
                     {
                         "success": True,
-                        "path": str(path),
+                        "path": file_path,
                         "query": query,
                         "match_count": len(matches),
                         "matches": matches,

@@ -135,6 +135,19 @@ def aggregate_run(run_dir: Path) -> dict[str, Any]:
     context_bytes_saved = sum(
         int(item.get("bytes_saved", 0)) for item in context_compaction_events
     )
+    context_source_bytes = sum(
+        int(item.get("source_bytes", 0))
+        for item in context_compaction_events
+    )
+    context_compacted_bytes = sum(
+        int(item.get("compacted_bytes", 0))
+        for item in context_compaction_events
+    )
+    context_skip_events = [
+        item
+        for item in lifecycle_events
+        if item.get("event") == "context_compaction_skipped"
+    ]
     recall_events = [
         item
         for item in lifecycle_events
@@ -150,6 +163,27 @@ def aggregate_run(run_dir: Path) -> dict[str, Any]:
                     continue
                 if row.get("process_used_bytes") not in ("", None):
                     process_gpu_values.append(float(row["process_used_bytes"]))
+
+    artifact_storage_bytes = _measured_storage_bytes(
+        run_dir,
+        "cases/**/artifacts/**/*",
+        measured_keys,
+    )
+    checkpoint_bytes = _measured_storage_bytes(
+        run_dir,
+        "cases/**/checkpoints.sqlite",
+        measured_keys,
+    )
+    conversation_bytes = _measured_storage_bytes(
+        run_dir,
+        "cases/**/conversations.sqlite",
+        measured_keys,
+    )
+    context_storage_bytes = _measured_storage_bytes(
+        run_dir,
+        "cases/**/context_memory.sqlite",
+        measured_keys,
+    )
 
     return {
         "sample_count": len(measured),
@@ -182,28 +216,18 @@ def aggregate_run(run_dir: Path) -> dict[str, Any]:
             if externalized_tool_output_bytes
             else 0.0
         ),
-        "artifact_storage_bytes": _measured_storage_bytes(
-            run_dir,
-            "cases/**/artifacts/**/*",
-            measured_keys,
-        ),
+        "artifact_storage_bytes": artifact_storage_bytes,
         "peak_gpu_process_bytes": (
             max(process_gpu_values) if process_gpu_values else None
         ),
-        "checkpoint_bytes": _measured_storage_bytes(
-            run_dir,
-            "cases/**/checkpoints.sqlite",
-            measured_keys,
-        ),
-        "conversation_bytes": _measured_storage_bytes(
-            run_dir,
-            "cases/**/conversations.sqlite",
-            measured_keys,
-        ),
-        "context_storage_bytes": _measured_storage_bytes(
-            run_dir,
-            "cases/**/context_memory.sqlite",
-            measured_keys,
+        "checkpoint_bytes": checkpoint_bytes,
+        "conversation_bytes": conversation_bytes,
+        "context_storage_bytes": context_storage_bytes,
+        "total_persistent_storage_bytes": (
+            artifact_storage_bytes
+            + checkpoint_bytes
+            + conversation_bytes
+            + context_storage_bytes
         ),
         "context_budget_event_count": len(context_budget_events),
         "context_tokens_before": context_tokens_before,
@@ -215,6 +239,11 @@ def aggregate_run(run_dir: Path) -> dict[str, Any]:
             else 0.0
         ),
         "context_compaction_count": len(context_compaction_events),
+        "context_compaction_skipped_count": sum(
+            int(item.get("record_count", 0)) for item in context_skip_events
+        ),
+        "context_compaction_source_bytes": context_source_bytes,
+        "context_compacted_bytes": context_compacted_bytes,
         "context_compaction_bytes_saved": context_bytes_saved,
         "context_recall_count": len(recall_events),
         "context_recalled_turns": sum(

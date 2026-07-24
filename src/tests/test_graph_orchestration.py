@@ -160,6 +160,23 @@ class TestPlannerNormalOutput:
         assert result["current_step_index"] == 0
         assert result["status"] == "executing"
 
+    def test_conversation_only_turn_skips_planner_inference(self, base_state):
+        base_state.update(
+            {
+                "task_goal": "上一轮我告诉你的项目代号是什么？",
+                "current_user_input": "上一轮我告诉你的项目代号是什么？",
+                "conversation_id": "conversation-1",
+            }
+        )
+        with patch("agent_core.graph.planner.get_engine") as get_engine_mock:
+            result = planner_node(base_state)
+
+        get_engine_mock.assert_not_called()
+        assert result["status"] == "executing"
+        assert result["plan_steps"] == [
+            "直接处理当前会话请求：上一轮我告诉你的项目代号是什么？"
+        ]
+
 
 class TestFinalizerFallback:
     def test_truncated_finalizer_uses_complete_executor_summaries(self, base_state):

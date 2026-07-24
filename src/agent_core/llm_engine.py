@@ -323,6 +323,10 @@ class ChatLlamaCpp(BaseChatModel):
     top_k: int = Field(default=40, description="Top-k sampling")
     repeat_penalty: float = Field(default=1.1, description="Repeat penalty")
     max_tokens: int = Field(default=512, description="Max tokens to generate per response")
+    seed: int = Field(
+        default=-1,
+        description="Sampling seed (-1 lets llama.cpp choose a random seed)",
+    )
     stop: Optional[List[str]] = Field(default=None, description="Additional stop tokens")
     verbose: bool = Field(default=False, description="Enable verbose llama.cpp output")
     request_timeout: float = Field(
@@ -361,6 +365,7 @@ class ChatLlamaCpp(BaseChatModel):
                 n_batch=self.n_batch,
                 n_threads=self.n_threads,
                 chat_format=self.chat_format,
+                seed=self.seed,
                 verbose=self.verbose,
             )
         except Exception as exc:
@@ -382,6 +387,7 @@ class ChatLlamaCpp(BaseChatModel):
             "model_path": self.model_path,
             "n_ctx": self.n_ctx,
             "n_gpu_layers": self.n_gpu_layers,
+            "seed": self.seed,
         }
 
     # ------------------------------------------------------------------
@@ -685,6 +691,7 @@ class EngineConfig:
     top_k: int = 40
     repeat_penalty: float = 1.1
     max_tokens: int = 512
+    seed: int = -1
     stop: Optional[List[str]] = None
     verbose: bool = False
     request_timeout: float = 60.0

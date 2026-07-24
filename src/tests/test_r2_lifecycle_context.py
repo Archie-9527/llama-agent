@@ -21,7 +21,10 @@ from agent_core.memory.context_manager import (
 )
 from agent_core.memory.models import Lifecycle
 from agent_core.memory.store import ContextStore
-from agent_core.prompt_assembler import assemble_reflection_prompt
+from agent_core.prompt_assembler import (
+    assemble_execution_prompt,
+    assemble_finalization_prompt,
+)
 
 
 class _TokenEngine:
@@ -56,7 +59,10 @@ def test_memory_config_loads_r2_fields(tmp_path: Path):
 lifecycle_context = true
 context_store_path = "data/custom-context.sqlite"
 context_budget_tokens = 9000
+context_activation_tokens = 1500
 context_trigger_ratio = 0.8
+context_min_compaction_bytes = 3000
+context_min_compaction_ratio = 0.4
 hot_execution_records = 3
 summary_mode = "deterministic"
 checkpoint_compaction = false
@@ -67,7 +73,10 @@ checkpoint_compaction = false
     assert config.lifecycle_context is True
     assert config.context_store_path == Path("data/custom-context.sqlite")
     assert config.context_budget_tokens == 9000
+    assert config.context_activation_tokens == 1500
     assert config.context_trigger_ratio == 0.8
+    assert config.context_min_compaction_bytes == 3000
+    assert config.context_min_compaction_ratio == 0.4
     assert config.hot_execution_records == 3
     assert config.summary_mode == "deterministic"
     assert config.checkpoint_compaction is False
@@ -105,6 +114,8 @@ def test_commit_archives_and_compacts_old_execution_records(tmp_path: Path):
             tmp_path,
             hot_execution_records=2,
             summary_target_chars=80,
+            summary_trigger_tokens=100,
+            context_min_compaction_bytes=128,
         )
     )
     state = {
@@ -125,12 +136,12 @@ def test_commit_archives_and_compacts_old_execution_records(tmp_path: Path):
         "lifecycle_stats": {},
     }
     manager.commit(state, event="executor")
-    assert all(record.get("_r2_compacted") for record in state["execution_log"][:3])
-    assert all(not record.get("_r2_compacted") for record in state["execution_log"][-2:])
+    assert all(record.get("_r2_compacted") for record in state["execution_log"][:4])
+    assert not state["execution_log"][-1].get("_r2_compacted")
     assert len(state["execution_log"][0]["result"]) < 150
-    assert len(state["archived_context_ids"]) == 3
-    assert len(manager.store.list_owner("task", "__unscoped__")) == 3
-    assert state["pinned_facts"][0]["text"] == "记住项目代号是 AgentMem"
+    assert len(state["archived_context_ids"]) == 4
+    assert len(manager.store.list_owner("task", "__unscoped__")) == 4
+    assert state["pinned_facts"] == []
 
 
 def test_conversation_selection_keeps_pinned_and_recent_turns(tmp_path: Path):
@@ -165,7 +176,66 @@ def test_conversation_selection_keeps_pinned_and_recent_turns(tmp_path: Path):
     assert "AgentMem" in rendered
     assert "7319" in rendered
     assert "历史第 8 轮" in rendered
-    assert len(manager.store.list_owner("conversation", "conversation-1")) == 8
+    assert manager.store is None
+
+
+def test_short_conversation_bypasses_r2_without_creating_store(tmp_path: Path):
+    manager = initialize_lifecycle_context(_enabled_config(tmp_path))
+    turns = [
+        SimpleNamespace(
+            turn_id="turn-0",
+            turn_index=0,
+            user_input="你好",
+            assistant_output="你好",
+            status="done",
+        )
+    ]
+
+    assert manager.should_manage_conversation(
+        turns=turns,
+        current_input="继续",
+        engine=_TokenEngine(),
+        baseline_history_turns=8,
+    ) is False
+    assert manager.store is None
+    assert not (tmp_path / "context.sqlite").exists()
+
+
+def test_conversation_recall_prefers_latest_fact_correction(tmp_path: Path):
+    manager = initialize_lifecycle_context(
+        _enabled_config(
+            tmp_path,
+            hot_conversation_turns=2,
+            context_retrieval_top_k=1,
+            context_retrieval_token_budget=4000,
+        )
+    )
+    turns = [
+        SimpleNamespace(
+            turn_id=f"turn-{index}",
+            turn_index=index,
+            user_input=(
+                "记住项目代号是 AgentMem，校验码是 7319"
+                if index == 0
+                else "把校验码更正为 9090"
+                if index == 4
+                else f"无关占位问题 {index}"
+            ),
+            assistant_output="已记录",
+            status="done",
+        )
+        for index in range(10)
+    ]
+
+    rendered = manager.select_conversation_context(
+        conversation_id="conversation-correction",
+        turns=turns,
+        current_input="此前告诉你的校验码是什么？",
+        engine=_TokenEngine(),
+    )
+
+    assert "9090" in rendered
+    assert "7319" not in rendered
 
 
 def test_prompt_assembler_injects_r2_context_only_when_enabled(tmp_path: Path):
@@ -178,15 +248,55 @@ def test_prompt_assembler_injects_r2_context_only_when_enabled(tmp_path: Path):
         "conversation_context": "用户此前给出校验码7319",
     }
     initialize_lifecycle_context(_enabled_config(tmp_path))
-    messages = assemble_reflection_prompt(state, _TokenEngine())
+    messages = assemble_execution_prompt(
+        state,
+        _TokenEngine(),
+        available_tools=[],
+    )
     assert any(
         isinstance(message, HumanMessage) and "AgentMem" in str(message.content)
         for message in messages
     )
 
     _reset_lifecycle_context_for_testing()
-    messages = assemble_reflection_prompt(state, _TokenEngine())
-    assert not any(isinstance(message, HumanMessage) for message in messages)
+    messages = assemble_execution_prompt(
+        state,
+        _TokenEngine(),
+        available_tools=[],
+    )
+    assert not any(
+        isinstance(message, HumanMessage) and "AgentMem" in str(message.content)
+        for message in messages
+    )
+
+
+def test_finalizer_places_real_tool_evidence_after_model_interpretation():
+    state = {
+        "task_goal": "查询真实 runbook",
+        "plan_steps": ["计划猜测 runbook 是 RB-WRONG"],
+        "execution_log": [
+            {
+                "step": "模型整理",
+                "tool_used": None,
+                "result": "模型猜测 runbook 是 RB-WRONG",
+            },
+            {
+                "step": "查询数据库",
+                "tool_used": "query_sqlite",
+                "result": '{"runbook":"RB-2048"}',
+            },
+        ],
+    }
+
+    content = str(
+        assemble_finalization_prompt(state, _TokenEngine())[0].content
+    )
+
+    assert "计划猜测 runbook 是 RB-WRONG" not in content
+    assert content.index("模型猜测 runbook 是 RB-WRONG") < content.index(
+        "RB-2048"
+    )
+    assert "事实优先级最高" in content
 
 
 def test_conversation_manager_passes_history_separately_in_r2(tmp_path: Path):
@@ -195,6 +305,7 @@ def test_conversation_manager_passes_history_separately_in_r2(tmp_path: Path):
             tmp_path,
             hot_conversation_turns=2,
             context_retrieval_token_budget=4000,
+            context_activation_tokens=1,
         )
     )
     store = ConversationStore(tmp_path / "conversations.sqlite")
@@ -273,6 +384,10 @@ def test_small_multistage_evidence_remains_inline_without_pressure(
     assert not any(
         record.get("_r2_compacted") for record in state["execution_log"]
     )
+    assert not any(
+        "lifecycle" in record for record in state["execution_log"]
+    )
+    assert "context_version" not in state
     assert all("req-7319" in record["result"] for record in state["execution_log"])
 
 
@@ -325,6 +440,72 @@ def test_r2_workload_generates_requested_conversation_lengths(tmp_path: Path):
     )
     assert len(_prepare_case(case16, tmp_path / "case16")["turns"]) == 16
     assert len(_prepare_case(case32, tmp_path / "case32")["turns"]) == 32
+
+
+def test_r2_context_pressure_workload_uses_stable_relative_fixtures(
+    tmp_path: Path,
+):
+    suite = BenchmarkSuite.load(
+        Path("benchmark/workloads/r2_context_pressure.json")
+    )
+    case = suite.cases[0]
+
+    prepared = _prepare_case(case, tmp_path / "sample")
+
+    assert "{medium_file_" not in prepared["goal"]
+    assert "fixtures/evidence-00.txt" in prepared["goal"]
+    assert str(tmp_path) not in prepared["goal"]
+    for index in range(6):
+        fixture = (
+            tmp_path / "sample" / "fixtures" / f"evidence-{index:02d}.txt"
+        )
+        assert fixture.stat().st_size == 6000
+        assert f"R2-EVIDENCE-{index:02d}" in fixture.read_text(
+            encoding="utf-8"
+        )
+
+
+def test_r2_context_pressure_fixture_triggers_default_roi_policy(
+    tmp_path: Path,
+):
+    suite = BenchmarkSuite.load(
+        Path("benchmark/workloads/r2_context_pressure.json")
+    )
+    _prepare_case(suite.cases[0], tmp_path / "sample")
+    manager = initialize_lifecycle_context(_enabled_config(tmp_path))
+    records = []
+    for index in range(6):
+        content = (
+            tmp_path
+            / "sample"
+            / "fixtures"
+            / f"evidence-{index:02d}.txt"
+        ).read_text(encoding="utf-8")
+        records.append(
+            {
+                "step": f"读取证据 {index}",
+                "tool_used": "read_file",
+                "result": json.dumps(
+                    {"success": True, "content": content},
+                    ensure_ascii=False,
+                ),
+            }
+        )
+    state = {
+        "execution_log": records,
+        "reflection_notes": [],
+        "pinned_facts": [],
+        "context_summary": {},
+        "archived_context_ids": [],
+        "lifecycle_stats": {},
+    }
+
+    manager.commit(state, event="executor")
+
+    assert all(record.get("_r2_compacted") for record in records[:5])
+    assert not records[-1].get("_r2_compacted")
+    assert "R2-EVIDENCE-00" in records[0]["result"]
+    assert manager.store is not None
 
 
 def test_aggregator_reports_r2_lifecycle_metrics(tmp_path: Path):

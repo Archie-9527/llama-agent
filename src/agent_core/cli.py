@@ -193,6 +193,14 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Override Suite measured repetition count for each round",
     )
+    ablation_p.add_argument(
+        "--round-order",
+        default="R0,R1,R2",
+        help=(
+            "Comma-separated execution order containing R0,R1,R2 once each; "
+            "rotate it across repeated experiments to reduce thermal bias"
+        ),
+    )
 
     return parser
 
@@ -383,6 +391,11 @@ def main(argv: list[str] | None = None) -> int:
                 engine_overrides=_collect_engine_cli_overrides(args),
                 warmup_runs=args.warmup_runs,
                 measured_runs=args.measured_runs,
+                round_order=tuple(
+                    item.strip().upper()
+                    for item in args.round_order.split(",")
+                    if item.strip()
+                ),
                 progress_callback=console_progress,
             )
         except Exception as exc:

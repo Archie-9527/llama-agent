@@ -214,7 +214,10 @@ R2 在 R1 之上将上下文分为 PINNED、HOT、WARM、COLD 和 DEAD。当前�
 明确记忆和当前计划受到保护；最近执行记录保留原文；较旧执行结果使用确定性
 摘要替换并将原文归档到任务隔离的 `ContextStore`。多轮 Conversation 开启 R2
 后不再把全部历史拼入 `task_goal`，而是选择最近轮、明确要求记住的轮次和与
-当前问题相关的历史。
+当前问题相关的历史。R2 采用自适应策略：短对话直接沿用 R1；工具记录只有在
+累计 token 达到压力阈值，且单条记录同时满足最小字节数和最小压缩收益时才
+归档；`ContextStore` 在第一次有效归档时才创建。Reflector 和 Finalizer 不再
+重复注入同一份生命周期摘要。
 
 运行 R1/R2 同用例消融：
 
@@ -242,6 +245,19 @@ llama-agent --config agent_config.toml benchmark \
 
 R2 报告增加上下文投影前后 token、状态压缩字节、Conversation 召回次数和
 ContextStore 磁盘占用。`R2` round 会拒绝未同时开启 R1 与 R2 的配置。
+
+专项验证“多条中等工具结果累计造成上下文压力”：
+
+```bash
+llama-agent --config agent_config.toml ablation \
+  --suite benchmark/workloads/r2_context_pressure.json \
+  --output-root benchmark/results
+```
+
+这个 Case 连续读取 6 个 6000 字节文件。每次结果都低于默认 R1 的 8192 字节
+虚拟化阈值，因此 R1 不会介入；累计结果超过 R2 压力阈值后，R2 才会压缩较旧
+记录。正式报告应同时检查成功率、输入 Token、逻辑 KV、端到端延迟、
+`context_compaction_bytes_saved` 与 `total_persistent_storage_bytes`。
 
 ## 一键运行 R0–R2 消融实验
 
@@ -279,6 +295,11 @@ llama-agent --config agent_config.toml ablation \
   --suite benchmark/workloads/r0_full.json \
   --output-root benchmark/results
 ```
+
+为减弱连续运行时的温度/频率偏差，可在多次完整实验间轮换顺序，例如分别使用
+`--round-order R0,R1,R2`、`--round-order R1,R2,R0` 和
+`--round-order R2,R0,R1`。每个样本还会记录实际 llama.cpp seed，Manifest
+保存源码树 SHA-256；不同源码指纹会在跨轮报告中触发警告。
 
 也可以直接执行：
 

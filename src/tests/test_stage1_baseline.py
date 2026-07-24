@@ -309,10 +309,14 @@ def test_prepare_case_builds_deterministic_local_evidence(tmp_path: Path):
     )
     raw = _prepare_case(case, tmp_path / "sample")
     assert "{" not in raw["goal"]
-    payload = (tmp_path / "sample" / "payload.txt").read_text()
+    payload = (
+        tmp_path / "sample" / "fixtures" / "payload.txt"
+    ).read_text()
     assert payload.count("ONLY_ONCE") == 1
     assert payload.endswith("root_cause=connection_pool_exhausted\n")
-    with sqlite3.connect(tmp_path / "sample" / "incidents.sqlite") as connection:
+    with sqlite3.connect(
+        tmp_path / "sample" / "fixtures" / "incidents.sqlite"
+    ) as connection:
         row = connection.execute(
             "SELECT root_cause FROM incidents WHERE request_id='req-7319'"
         ).fetchone()
@@ -332,7 +336,9 @@ def test_prepare_case_can_place_evidence_in_middle(tmp_path: Path):
     )
 
     _prepare_case(case, tmp_path / "sample")
-    payload = (tmp_path / "sample" / "payload.txt").read_text()
+    payload = (
+        tmp_path / "sample" / "fixtures" / "payload.txt"
+    ).read_text()
 
     assert len(payload.encode("utf-8")) == 8192
     assert payload.count("MIDDLE_ONLY") == 1

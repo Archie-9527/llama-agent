@@ -12,9 +12,8 @@
 from __future__ import annotations
 
 import json
-import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from jinja2 import Environment, FileSystemLoader, TemplateNotFound
 
@@ -30,7 +29,6 @@ from langchain_core.messages.tool import ToolCall
 from agent_core.exceptions import (
     ContextBudgetExceededError,
     PromptAssemblyError,
-    ToolConsistencyError,
 )
 from agent_core.knowledge_scope import TokenCounter, truncate_history
 
@@ -546,18 +544,23 @@ def assemble_finalization_prompt(
     reserved_for_generation: int = 512,
 ) -> list[BaseMessage]:
     """Build a tool-free prompt that synthesizes the whole task result."""
+    projected = _project_execution_log(
+        state.get("execution_log", []),
+        engine,
+        token_budget=max(
+            1024,
+            min(6000, _context_window(state, engine) // 3),
+        ),
+    )
     sys_msg = _render_system_prompt(
         "finalization_system.jinja2",
         task_goal=state.get("task_goal", ""),
-        plan_steps=state.get("plan_steps", []),
-        execution_log=_project_execution_log(
-            state.get("execution_log", []),
-            engine,
-            token_budget=max(
-                1024,
-                min(6000, _context_window(state, engine) // 3),
-            ),
-        ),
+        model_summaries=[
+            record for record in projected if not record.get("tool_used")
+        ],
+        tool_evidence=[
+            record for record in projected if record.get("tool_used")
+        ],
     )
     raw: list[BaseMessage] = [sys_msg]
     lifecycle_message = _lifecycle_context_message(

@@ -54,7 +54,13 @@ class ConversationManager:
             for turn in self.store.list_turns(conversation_id)
             if turn.status != "running" and turn.user_input.strip()
         ]
-        if lifecycle.enabled:
+        lifecycle_active = lifecycle.should_manage_conversation(
+            turns=historical_turns,
+            current_input=user_input,
+            engine=self.engine,
+            baseline_history_turns=self.config.history_turns,
+        )
+        if lifecycle_active:
             history = lifecycle.select_conversation_context(
                 conversation_id=conversation_id,
                 turns=historical_turns,
@@ -77,7 +83,7 @@ class ConversationManager:
                 task_goal,
                 thread_id=thread_id,
                 conversation_id=conversation_id,
-                conversation_context=history if lifecycle.enabled else "",
+                conversation_context=history if lifecycle_active else "",
                 current_user_input=user_input,
             )
             answer = str(result.get("final_answer", "")).strip()
@@ -90,7 +96,10 @@ class ConversationManager:
                 error=error,
             )
             lifecycle.record_conversation_turn(
-                conversation_id, turn, self.engine
+                conversation_id,
+                turn,
+                self.engine,
+                active=lifecycle_active,
             )
             return turn, result
         except Exception as exc:

@@ -76,6 +76,10 @@ repeat_penalty = 1.1
 # 单次推理最大生成 token 数
 max_tokens = 512
 
+# 采样随机种子；Benchmark 会按 suite.seed + repetition 覆盖。
+# -1 表示普通运行时由 llama.cpp 随机选择。
+seed = -1
+
 # 是否启用 verbose 日志（大量 llama.cpp 内部输出）
 verbose = false
 
@@ -154,8 +158,13 @@ lifecycle_context = false
 # Benchmark worker 会把 context_store_path 重定向到每个样本的独立目录。
 context_store_path = "data/context_memory.sqlite"
 context_budget_tokens = 12000
+# 历史上下文低于该值时沿用 R1 原文历史，不启动 R2 检索。
+context_activation_tokens = 2048
 context_trigger_ratio = 0.75
 context_reserved_generation_tokens = 1024
+# 单条记录至少达到该大小且压缩率达到阈值才外置，避免小记录负优化。
+context_min_compaction_bytes = 2048
+context_min_compaction_ratio = 0.30
 hot_execution_records = 4
 hot_conversation_turns = 4
 hot_reflection_notes = 2

@@ -25,6 +25,8 @@ from agent_core.benchmark.models import BenchmarkSuite
 from agent_core.benchmark.report import write_report
 from agent_core.config import load_engine_config, load_memory_config
 
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
 
 def _filter_suite_cases(
     suite: BenchmarkSuite,
@@ -169,11 +171,18 @@ class BenchmarkRunner:
                 ]
                 completed = subprocess.run(
                     command,
-                    cwd=Path.cwd(),
+                    cwd=(
+                        sample_dir
+                        if (sample_dir / "fixtures").exists()
+                        else _PROJECT_ROOT
+                    ),
                     text=True,
                     capture_output=True,
                     env=_worker_environment(
-                        self.engine_overrides,
+                        {
+                            **self.engine_overrides,
+                            "model_path": manifest["model"]["path"],
+                        },
                         memory_config=manifest["memory_config"],
                     ),
                 )
@@ -191,6 +200,7 @@ class BenchmarkRunner:
                     {
                         "measured": measured,
                         "repetition": repetition,
+                        "seed": suite.seed + repetition,
                         "worker_exit_code": completed.returncode,
                     }
                 )
@@ -244,7 +254,7 @@ class BenchmarkRunner:
             self.config_file,
             cli_overrides=self.memory_overrides,
         )
-        model_path = Path(engine.model_path)
+        model_path = Path(engine.model_path).resolve()
         return {
             "run_id": run_id,
             "round": self.round_name,
@@ -255,6 +265,7 @@ class BenchmarkRunner:
                 "warmup_runs": suite.warmup_runs,
                 "measured_runs": suite.measured_runs,
                 "seed": suite.seed,
+                "worker_seed_policy": "suite.seed + repetition",
                 "case_count": len(suite.cases),
                 "case_filter": list(self.case_ids),
             },
@@ -290,6 +301,7 @@ class BenchmarkRunner:
                 "dirty_worktree": bool(
                     _git_value(["git", "status", "--porcelain"])
                 ),
+                "source_tree_sha256": _source_tree_sha256(_PROJECT_ROOT),
             },
         }
 
@@ -303,6 +315,34 @@ def _sha256(path: Path) -> str:
     with path.open("rb") as handle:
         while chunk := handle.read(8 * 1024 * 1024):
             digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _source_tree_sha256(project_root: Path) -> str:
+    """Fingerprint executable sources independent of Git cleanliness."""
+    digest = hashlib.sha256()
+    roots = (
+        project_root / "src" / "agent_core",
+        project_root / "benchmark" / "workloads",
+    )
+    files = [
+        path
+        for root in roots
+        if root.exists()
+        for path in root.rglob("*")
+        if path.is_file()
+        and "__pycache__" not in path.parts
+        and path.suffix not in {".pyc", ".gguf"}
+    ]
+    config = project_root / "agent_config.toml"
+    if config.exists():
+        files.append(config)
+    for path in sorted(files):
+        relative = path.relative_to(project_root).as_posix()
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
     return digest.hexdigest()
 
 
@@ -323,7 +363,7 @@ def _worker_environment(
     memory_config: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     environment = os.environ.copy()
-    source_dir = str((Path.cwd() / "src").resolve())
+    source_dir = str((_PROJECT_ROOT / "src").resolve())
     previous = environment.get("PYTHONPATH")
     environment["PYTHONPATH"] = (
         f"{source_dir}{os.pathsep}{previous}" if previous else source_dir
@@ -423,6 +463,7 @@ def _prepare_case(case, sample_dir: Path) -> dict[str, Any]:
     """Materialize deterministic local fixtures requested by workload metadata."""
     raw = case.to_dict()
     sample_dir.mkdir(parents=True, exist_ok=True)
+    fixtures_dir = sample_dir / "fixtures"
     replacements: dict[str, str] = {}
 
     filler_count = int(case.metadata.get("conversation_filler_turns", 0))
@@ -439,19 +480,47 @@ def _prepare_case(case, sample_dir: Path) -> dict[str, Any]:
                 "综合此前对话，项目代号和校验码分别是什么？",
             )
         )
-        raw["turns"] = [
-            seed_turn,
-            *[
-                f"这是上下文压力测试第 {index + 1} 轮。请只回复 ACK-{index + 1}。"
-                for index in range(filler_count)
-            ],
-            final_turn,
-        ]
+        filler_chars = int(
+            case.metadata.get("conversation_filler_chars", 0)
+        )
+        fillers: list[str] = []
+        for index in range(filler_count):
+            prefix = f"这是上下文压力测试第 {index + 1} 轮。"
+            detail = ""
+            if filler_chars:
+                unit = (
+                    f"背景记录{index + 1}：服务健康检查正常，当前内容仅用于"
+                    "制造可压缩的历史上下文，不包含新的长期事实。"
+                )
+                detail = (unit * (filler_chars // len(unit) + 1))[
+                    :filler_chars
+                ]
+            fillers.append(
+                f"{prefix}{detail}请只回复 ACK-{index + 1}。"
+            )
+        correction = str(
+            case.metadata.get("conversation_correction_turn", "")
+        ).strip()
+        correction_after = int(
+            case.metadata.get(
+                "conversation_correction_after",
+                max(1, filler_count // 2),
+            )
+        )
+        generated_turns = [seed_turn, *fillers]
+        if correction:
+            generated_turns.insert(
+                min(len(generated_turns), max(1, correction_after + 1)),
+                correction,
+            )
+        generated_turns.append(final_turn)
+        raw["turns"] = generated_turns
 
     size = int(case.metadata.get("fixture_size_bytes", 0))
     if size > 0:
         marker = str(case.metadata.get("fixture_marker", "AGENTMEM_PAYLOAD"))
-        fixture = sample_dir / "payload.txt"
+        fixtures_dir.mkdir(parents=True, exist_ok=True)
+        fixture = fixtures_dir / "payload.txt"
         marker_position = str(
             case.metadata.get("fixture_marker_position", "end")
         )
@@ -461,13 +530,46 @@ def _prepare_case(case, sample_dir: Path) -> dict[str, Any]:
             marker=marker,
             marker_position=marker_position,
         )
-        replacements["{fixture_path}"] = str(fixture)
+        replacements["{fixture_path}"] = "fixtures/payload.txt"
+
+    medium_count = int(
+        case.metadata.get("medium_file_fixture_count", 0)
+    )
+    if medium_count:
+        fixtures_dir.mkdir(parents=True, exist_ok=True)
+        medium_size = int(
+            case.metadata.get("medium_file_size_bytes", 6000)
+        )
+        markers = list(
+            case.metadata.get(
+                "medium_file_markers",
+                [f"R2-EVIDENCE-{index:02d}" for index in range(medium_count)],
+            )
+        )
+        if len(markers) != medium_count:
+            raise ValueError(
+                "medium_file_markers length must equal "
+                "medium_file_fixture_count"
+            )
+        for index, marker in enumerate(markers):
+            fixture = fixtures_dir / f"evidence-{index:02d}.txt"
+            _write_payload_fixture(
+                fixture,
+                size=medium_size,
+                marker=str(marker),
+                marker_position="end",
+            )
+            replacements[
+                f"{{medium_file_{index}}}"
+            ] = f"fixtures/evidence-{index:02d}.txt"
 
     if case.metadata.get("incident_fixture"):
-        replacements.update(_write_incident_fixture(sample_dir))
+        fixtures_dir.mkdir(parents=True, exist_ok=True)
+        replacements.update(_write_incident_fixture(fixtures_dir))
 
     if case.metadata.get("document_fixture"):
-        document = sample_dir / "service_notes.txt"
+        fixtures_dir.mkdir(parents=True, exist_ok=True)
+        document = fixtures_dir / "service_notes.txt"
         document.write_text(
             "\n".join(
                 [
@@ -480,7 +582,7 @@ def _prepare_case(case, sample_dir: Path) -> dict[str, Any]:
             ),
             encoding="utf-8",
         )
-        replacements["{document_path}"] = str(document)
+        replacements["{document_path}"] = "fixtures/service_notes.txt"
 
     return _replace_placeholders(raw, replacements)
 
@@ -522,8 +624,8 @@ def _write_payload_fixture(
     path.write_bytes(payload)
 
 
-def _write_incident_fixture(sample_dir: Path) -> dict[str, str]:
-    log_path = sample_dir / "incident.log"
+def _write_incident_fixture(fixtures_dir: Path) -> dict[str, str]:
+    log_path = fixtures_dir / "incident.log"
     log_path.write_text(
         "\n".join(
             [
@@ -542,7 +644,7 @@ def _write_incident_fixture(sample_dir: Path) -> dict[str, str]:
         encoding="utf-8",
     )
 
-    db_path = sample_dir / "incidents.sqlite"
+    db_path = fixtures_dir / "incidents.sqlite"
     connection = sqlite3.connect(db_path)
     try:
         connection.execute(
@@ -582,7 +684,7 @@ def _write_incident_fixture(sample_dir: Path) -> dict[str, str]:
     finally:
         connection.close()
 
-    config_path = sample_dir / "service.conf"
+    config_path = fixtures_dir / "service.conf"
     config_path.write_text(
         "\n".join(
             [
@@ -595,9 +697,9 @@ def _write_incident_fixture(sample_dir: Path) -> dict[str, str]:
         encoding="utf-8",
     )
     return {
-        "{log_path}": str(log_path),
-        "{db_path}": str(db_path),
-        "{config_path}": str(config_path),
+        "{log_path}": "fixtures/incident.log",
+        "{db_path}": "fixtures/incidents.sqlite",
+        "{config_path}": "fixtures/service.conf",
     }
 
 

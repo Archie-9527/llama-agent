@@ -64,7 +64,7 @@ class SqliteCapabilityProvider(CapabilityProvider):
             connection = sqlite3.connect(uri, uri=True)
             connection.row_factory = sqlite3.Row
             connection.execute("PRAGMA query_only = ON")
-            return str(path), connection
+            return db_path, connection
 
         def _describe(db_path: str, table_name: str) -> str:
             try:

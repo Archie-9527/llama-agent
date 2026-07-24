@@ -54,7 +54,7 @@ class LogCapabilityProvider(CapabilityProvider):
             path = resolve_allowed_path(log_path, roots)
             if not path.is_file():
                 raise ValueError("log_path is not a file")
-            return str(path), path.read_text(
+            return log_path, path.read_text(
                 encoding="utf-8", errors="replace"
             ).splitlines()
 

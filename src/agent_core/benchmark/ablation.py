@@ -51,9 +51,14 @@ def run_r0_r2_ablation(
     engine_overrides: dict[str, Any] | None = None,
     warmup_runs: int | None = None,
     measured_runs: int | None = None,
+    round_order: tuple[str, ...] = ("R0", "R1", "R2"),
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> AblationResult:
     """Run the same suite sequentially under R0, R1 and R2 policies."""
+    if len(round_order) != 3 or set(round_order) != set(ROUND_MEMORY_OVERRIDES):
+        raise ValueError(
+            "round_order must contain R0, R1 and R2 exactly once"
+        )
     group_id = (
         f"R0-R2-ablation-{suite_file.stem}-"
         f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-"
@@ -70,12 +75,13 @@ def run_r0_r2_ablation(
         case_ids=case_ids,
         warmup_runs=warmup_runs,
         measured_runs=measured_runs,
+        round_order=round_order,
         run_dirs=run_dirs,
         status="running",
     )
 
     try:
-        for round_name in ("R0", "R1", "R2"):
+        for round_name in round_order:
             if progress_callback is not None:
                 progress_callback(
                     {
@@ -104,6 +110,7 @@ def run_r0_r2_ablation(
                 case_ids=case_ids,
                 warmup_runs=warmup_runs,
                 measured_runs=measured_runs,
+                round_order=round_order,
                 run_dirs=run_dirs,
                 status="running",
             )
@@ -115,6 +122,7 @@ def run_r0_r2_ablation(
             case_ids=case_ids,
             warmup_runs=warmup_runs,
             measured_runs=measured_runs,
+            round_order=round_order,
             run_dirs=run_dirs,
             status="failed",
             error=f"{type(exc).__name__}: {exc}",
@@ -129,6 +137,7 @@ def run_r0_r2_ablation(
         case_ids=case_ids,
         warmup_runs=warmup_runs,
         measured_runs=measured_runs,
+        round_order=round_order,
         run_dirs=run_dirs,
         status="completed",
         report_path=report_path,
@@ -183,6 +192,7 @@ def _write_manifest(
     case_ids: tuple[str, ...],
     warmup_runs: int | None,
     measured_runs: int | None,
+    round_order: tuple[str, ...],
     run_dirs: dict[str, Path],
     status: str,
     report_path: Path | None = None,
@@ -196,6 +206,7 @@ def _write_manifest(
         "case_ids": list(case_ids),
         "warmup_runs_override": warmup_runs,
         "measured_runs_override": measured_runs,
+        "round_order": list(round_order),
         "round_memory_overrides": ROUND_MEMORY_OVERRIDES,
         "run_dirs": {
             name: str(path)

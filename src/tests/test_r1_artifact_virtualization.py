@@ -191,7 +191,9 @@ def test_on_demand_fixture_hides_evidence_from_head_and_tail(tmp_path: Path):
         Path("benchmark/workloads/r1_artifact_virtualization.json")
     ).cases[-1]
     _prepare_case(case, tmp_path / "sample")
-    payload = (tmp_path / "sample" / "payload.txt").read_text()
+    payload = (
+        tmp_path / "sample" / "fixtures" / "payload.txt"
+    ).read_text()
 
     marker_index = payload.index("R1_HIDDEN_EVIDENCE")
     assert len(payload) // 3 < marker_index < len(payload) * 2 // 3
