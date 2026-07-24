@@ -42,6 +42,7 @@ Capability = Any  # replaced at import time — see _init_capability_type()
 # ---------------------------------------------------------------------------
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
+_EVIDENCE_SYNTHESIS_RESULT_CHARS = 512
 
 _jinja_env = Environment(
     loader=FileSystemLoader(str(_TEMPLATES_DIR)),
@@ -156,15 +157,19 @@ def _project_execution_log(
     engine: TokenCounter,
     *,
     token_budget: int,
+    max_result_chars: int = 4096,
 ) -> list[dict]:
     """Build a bounded, evidence-preserving view for model-facing prompts.
 
     Full records remain in AgentState/checkpoints/telemetry.  Planner,
     Reflector and Finalizer receive this projection so one large tool payload
-    cannot consume their entire protected SystemMessage.
+    cannot consume their entire protected SystemMessage.  ``max_result_chars``
+    also gives evidence-synthesis phases a representation-independent
+    per-record ceiling: an R2 summary must not receive a larger prompt budget
+    merely because it is already shorter than the corresponding R0/R1 record.
     """
     records = [dict(record) for record in execution_log[-32:]]
-    max_chars = 4096
+    max_chars = max(256, int(max_result_chars))
     while True:
         projected = [
             {
@@ -516,6 +521,7 @@ def assemble_reflection_prompt(
         state.get("execution_log", []),
         engine,
         token_budget=max(1024, min(6000, _context_window(state, engine) // 3)),
+        max_result_chars=_EVIDENCE_SYNTHESIS_RESULT_CHARS,
     )
 
     sys_msg = _render_system_prompt(
@@ -551,6 +557,7 @@ def assemble_finalization_prompt(
             1024,
             min(6000, _context_window(state, engine) // 3),
         ),
+        max_result_chars=_EVIDENCE_SYNTHESIS_RESULT_CHARS,
     )
     sys_msg = _render_system_prompt(
         "finalization_system.jinja2",

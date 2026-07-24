@@ -24,6 +24,7 @@ from agent_core.memory.store import ContextStore
 from agent_core.prompt_assembler import (
     assemble_execution_prompt,
     assemble_finalization_prompt,
+    assemble_reflection_prompt,
 )
 
 
@@ -268,6 +269,88 @@ def test_prompt_assembler_injects_r2_context_only_when_enabled(tmp_path: Path):
         isinstance(message, HumanMessage) and "AgentMem" in str(message.content)
         for message in messages
     )
+
+
+def test_completed_steps_alone_do_not_create_redundant_lifecycle_prompt(
+    tmp_path: Path,
+):
+    initialize_lifecycle_context(_enabled_config(tmp_path))
+    state = {
+        "task_goal": "分析六份证据",
+        "plan_steps": ["读取证据", "汇总结论"],
+        "current_step_index": 1,
+        "execution_log": [],
+        "pinned_facts": [],
+        "context_summary": {
+            "completed_steps": [
+                "读取证据 0",
+                "读取证据 1",
+                "读取证据 2",
+            ]
+        },
+        "conversation_context": "",
+    }
+
+    messages = assemble_execution_prompt(
+        state,
+        _TokenEngine(),
+        available_tools=[],
+    )
+
+    assert not any(
+        "生命周期上下文管理器" in str(message.content)
+        for message in messages
+    )
+
+
+def test_evidence_phase_projection_is_independent_of_r2_record_size():
+    baseline_records = []
+    compacted_records = []
+    for index in range(6):
+        marker = f"|EVIDENCE-{index:02d}|"
+        baseline = "R" * 5500 + marker + "Z" * 200
+        compacted = "C" * 480 + marker + "Z" * 200
+        common = {
+            "step": f"读取证据 {index}",
+            "tool_used": "read_file",
+            "tool_args": {"path": f"evidence-{index:02d}.txt"},
+        }
+        baseline_records.append({**common, "result": baseline})
+        compacted_records.append(
+            {
+                **common,
+                "result": compacted,
+                "_r2_compacted": True,
+                "memory_ref": f"memory-{index}",
+            }
+        )
+
+    def state(records: list[dict]) -> dict:
+        return {
+            "task_goal": "汇总六份证据",
+            "plan_steps": ["依次读取证据", "汇总结论"],
+            "execution_log": records,
+        }
+
+    engine = _TokenEngine()
+    for assembler in (
+        assemble_reflection_prompt,
+        assemble_finalization_prompt,
+    ):
+        baseline_prompt = assembler(state(baseline_records), engine)
+        compacted_prompt = assembler(state(compacted_records), engine)
+        baseline_text = "\n".join(
+            str(message.content) for message in baseline_prompt
+        )
+        compacted_text = "\n".join(
+            str(message.content) for message in compacted_prompt
+        )
+
+        assert engine.get_num_tokens(compacted_text) == engine.get_num_tokens(
+            baseline_text
+        )
+        for index in range(6):
+            assert f"EVIDENCE-{index:02d}" in compacted_text
 
 
 def test_finalizer_places_real_tool_evidence_after_model_interpretation():

@@ -127,20 +127,20 @@ class LifecycleContextManager:
         ]
         summary_data = state.get("context_summary", {})
         conversation = str(state.get("conversation_context", "")).strip()
-        if not pinned_items and not summary_data and not conversation:
-            return ContextView()
-        before_parts = [
-            conversation,
-            json.dumps(pinned_items, ensure_ascii=False),
-            json.dumps(summary_data, ensure_ascii=False),
-        ]
-        before = sum(engine.get_num_tokens(part) for part in before_parts if part)
         pinned = "\n".join(
             f"- {item.get('text', '')}"
             for item in pinned_items
         )
         summary = self._render_summary(summary_data)
-        rendered = "\n\n".join(filter(None, (pinned, summary, conversation)))
+        # ``completed_steps`` remains in state/checkpoints for diagnostics, but
+        # it is already represented by the plan and execution history.  Only
+        # model-facing semantic content should activate lifecycle injection.
+        rendered_before = "\n\n".join(
+            filter(None, (pinned, summary, conversation))
+        )
+        if not rendered_before:
+            return ContextView()
+        before = engine.get_num_tokens(rendered_before)
         budget = min(
             self.config.context_budget_tokens,
             max(
@@ -149,12 +149,16 @@ class LifecycleContextManager:
                 - self.config.context_reserved_generation_tokens,
             ),
         )
-        if engine.get_num_tokens(rendered) > budget:
+        if before > budget:
             # Conversation context is the only fully discardable part here;
             # pinned facts and structured summaries remain protected.
+            protected = "\n\n".join(filter(None, (pinned, summary)))
+            protected_tokens = (
+                engine.get_num_tokens(protected) if protected else 0
+            )
             conversation = self._fit_text(
                 conversation,
-                max(0, budget - engine.get_num_tokens(pinned + summary)),
+                max(0, budget - protected_tokens),
                 engine,
             )
         view = ContextView(
@@ -618,8 +622,6 @@ class LifecycleContextManager:
             text = fact.get("text") if isinstance(fact, dict) else fact
             if text:
                 lines.append(f"- 已确认：{text}")
-        for step in summary.get("completed_steps", [])[-8:]:
-            lines.append(f"- 已完成：{step}")
         return "\n".join(lines)
 
     @staticmethod
