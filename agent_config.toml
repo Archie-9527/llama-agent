@@ -44,13 +44,13 @@ log_file = "data/llama-agent-tui.log"
 # ---------------------------------------------------------------------------
 [engine]
 # [必填] GGUF 模型文件路径
-model_path = "/root/llama-agent/src/tests/models/Qwen3.5-4B-UD-Q8_K_XL.gguf"
+model_path = "/root/autodl-tmp/llama-agent/src/tests/models/Qwen3VL-8B-Instruct-Q8_0.gguf"
 
 # 上下文窗口大小（token 数）
 n_ctx = 20000
 
 # GPU 层数（0 = 纯CPU；-1 = 全部offload到GPU）
-n_gpu_layers = 0
+n_gpu_layers = -1
 
 # 批处理大小
 n_batch = 512
