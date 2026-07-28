@@ -1,4 +1,4 @@
-"""Benchmark suite and result contracts."""
+"""Benchmark Suite 与结果契约。"""
 
 from __future__ import annotations
 

@@ -1,7 +1,6 @@
-"""Opt-in end-to-end conversation-memory checks using local GGUF models.
+"""使用本地 GGUF 模型进行可选的端到端会话记忆检查。
 
-Run explicitly because loading both models is intentionally too expensive for
-the normal unit-test suite:
+由于加载两个模型的开销过高，不适合常规单元测试套件，因此需要显式运行：
 
     RUN_REAL_CONVERSATION_TESTS=1 pytest -q -s \
       src/tests/test_conversation_memory_real_models.py
@@ -115,6 +114,7 @@ enabled = false
             "environment; rerun on the benchmark host"
         )
     assert completed.returncode == 0, diagnostic
+    # 可用于诊断两轮任务是否均已完成：
     # assert completed.stdout.count("Final status: done") == 2, diagnostic
     second_turn = completed.stdout.rsplit("Final status: done", maxsplit=1)[-1]
     assert "AgentMem" in second_turn, diagnostic

@@ -1,4 +1,4 @@
-"""Application service for user-visible multi-turn conversations."""
+"""面向用户可见多轮会话的应用服务。"""
 
 from __future__ import annotations
 
@@ -123,8 +123,8 @@ class ConversationManager:
         )
 
     def _render_history(self, conversation_id: str) -> str:
-        # A failed turn's user input is still a valid conversation fact.  Its
-        # assistant output is not trusted and is therefore never replayed.
+            # 失败轮次中的用户输入仍是有效会话事实，但其助手输出不可信，因此
+            # 永远不会被重放。
         historical = [
             turn
             for turn in self.store.list_turns(conversation_id)
@@ -166,12 +166,10 @@ class ConversationManager:
 
     @staticmethod
     def _compose_lifecycle_goal(user_input: str) -> str:
-        """Keep conversation semantics in the high-priority task envelope.
+        """在高优先级任务信封中保留会话语义。
 
-        R2 supplies selected history separately, but the current request still
-        needs to be identified as one conversation turn.  Otherwise phrases
-        such as “把端口修正为 9090” can be mistaken for authorization to edit
-        an invented system file.
+        R2 会单独提供选中的历史，但当前请求仍需标识为一个会话轮次。否则，
+        “把端口修正为 9090”之类的表述可能被误判为允许编辑虚构系统文件的授权。
         """
         return (
             "这是同一会话中的当前用户请求。生命周期上下文中的内容是历史"

@@ -17,20 +17,20 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, TypeAlias
 
-#: Signature of a tool handler — callable that accepts keyword arguments
-#: and returns a result (string, dict, number, …).
+#: 工具处理程序签名——接收关键字参数并返回结果（字符串、字典、数字等）的
+#: 可调用对象。
 Handler: TypeAlias = Callable[..., Any]
 
 
 @dataclass(frozen=True)
 class Capability:
-    """Immutable descriptor for a single registered tool.
+    """单个已注册工具的不可变描述。
 
-    Attributes:
-        name: Unique tool identifier (used in GBNF ``tool`` const).
-        description: Human-readable explanation of what the tool does.
-        handler: The callable that executes the tool.
-        input_schema: JSON Schema dict describing the tool's parameters.
+    属性：
+        name：唯一工具标识符，用于 GBNF 的 ``tool`` 常量。
+        description：对工具用途的人类可读说明。
+        handler：执行工具的可调用对象。
+        input_schema：描述工具参数的 JSON Schema 字典。
     """
 
     name: str
@@ -40,8 +40,8 @@ class Capability:
 
 
 # ---------------------------------------------------------------------------
-# Internal registry storage — guarded by a module-level lock so concurrent
-# registration during startup (e.g. multi-threaded plugin loading) is safe.
+# 内部注册表存储——由模块级锁保护，确保启动期间的并发注册安全，例如多线程
+# 加载插件。
 # ---------------------------------------------------------------------------
 
 _registry: Dict[str, Capability] = {}
@@ -49,7 +49,7 @@ _registry_lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
-# [STABLE] Public API
+# [稳定接口] 公共 API
 # ---------------------------------------------------------------------------
 
 
@@ -58,9 +58,9 @@ def register(
     description: str,
     input_schema: Dict[str, Any],
 ) -> Callable[[Handler], Handler]:
-    """Decorator that registers a function as an agent capability.
+    """将函数注册为 Agent 能力的装饰器。
 
-    Usage::
+    用法::
 
         @register(
             name="search_log",
@@ -77,17 +77,16 @@ def register(
         def search_log(log_path: str, query: str) -> str:
             ...
 
-    Args:
-        name: Unique tool identifier.
-        description: Human-readable summary of what the tool does.
-        input_schema: JSON Schema for the tool's arguments.
+    参数：
+        name：唯一工具标识符。
+        description：工具用途的人类可读摘要。
+        input_schema：工具参数的 JSON Schema。
 
-    Returns:
-        A decorator that wraps the handler function (identity — the
-        original function is returned unchanged after registration).
+    返回：
+        包装处理函数的装饰器。该包装保持恒等，注册后会原样返回原函数。
 
-    Raises:
-        ValueError: If *name* is already registered.
+    异常：
+        ValueError：*name* 已注册时抛出。
     """
 
     def _decorator(handler: Handler) -> Handler:
@@ -109,16 +108,16 @@ def register(
 
 
 def get_capability(name: str) -> Capability:
-    """Look up a registered capability by name.
+    """按名称查找已注册能力。
 
-    Args:
-        name: The unique tool identifier.
+    参数：
+        name：唯一工具标识符。
 
-    Returns:
-        The matching ``Capability`` descriptor.
+    返回：
+        匹配的 ``Capability`` 描述。
 
-    Raises:
-        KeyError: If *name* is not registered.
+    异常：
+        KeyError：*name* 尚未注册时抛出。
     """
     try:
         return _registry[name]
@@ -130,23 +129,21 @@ def get_capability(name: str) -> Capability:
 
 
 def list_capabilities() -> List[Capability]:
-    """Return a snapshot of every currently registered capability.
+    """返回当前全部已注册能力的快照。
 
-    The returned list is a copy — mutating it does not affect the registry
-    and racing registrations / deregistrations do not cause inconsistencies
-    in callers that cached an earlier snapshot.
+    返回的列表是副本，修改它不会影响注册表；并发注册或注销也不会导致缓存了
+    较早快照的调用方出现不一致。
     """
     with _registry_lock:
         return list(_registry.values())
 
 
 def clear_registry() -> None:
-    """Remove **all** registered capabilities.
+    """移除**所有**已注册能力。
 
-    Primarily intended for testing — call between test cases to avoid
-    cross-test state leakage.
+    主要供测试使用，应在测试用例之间调用以避免跨测试状态泄漏。
 
-    WARNING: Do not call this in production code while the agent is running.
+    警告：Agent 运行期间不要在生产代码中调用本函数。
     """
     with _registry_lock:
         _registry.clear()

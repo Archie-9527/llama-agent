@@ -1,11 +1,10 @@
-"""Capability bootstrap — read ``ToolsConfig``, walk all registered
-providers, filter by ``enabled_tools``, and write the final capability
-set into ``capability_registry`` via ``register()``.
+"""能力引导——读取 ``ToolsConfig``，遍历所有已注册的 Provider，按
+``enabled_tools`` 过滤，并通过 ``register()`` 将最终能力集合写入
+``capability_registry``。
 
-This module is the **single bridge** between the TOML config layer and
-the global ``capability_registry``.  No other code may call
-``capability_registry.register()`` directly — all tool registration
-flows through ``bootstrap_capabilities()``.
+本模块是 TOML 配置层与全局 ``capability_registry`` 之间的**唯一桥梁**。
+其他代码不得直接调用 ``capability_registry.register()``，所有工具注册都必须
+经过 ``bootstrap_capabilities()``。
 """
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ from typing import Any
 
 from agent_core.capability_registry import Capability, clear_registry, register
 
-import agent_core.capabilities.providers  # noqa: F401  trigger auto-discovery
+import agent_core.capabilities.providers  # noqa: F401  触发自动发现
 
 from agent_core.capabilities.base import (
     ToolProviderConfigError,
@@ -28,24 +27,21 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# [STABLE] ToolsConfig — single config container for all tools
+# [稳定接口] ToolsConfig——所有工具的统一配置容器
 # ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
 class ToolsConfig:
-    """Top-level tool configuration.
+    """顶层工具配置。
 
-    Instead of hard-coding one field per provider, we use a generic
-    ``providers`` dict keyed by category name.  Adding a new provider
-    needs zero changes here.
+    这里不为每个 Provider 硬编码字段，而是使用以类别名称为键的通用
+    ``providers`` 字典，因此添加新 Provider 无需修改本类。
 
-    Attributes:
-        enabled_tools: Explicit allowlist of capability names.  An empty
-            list means "all successfully built capabilities are enabled".
-        providers: ``{category: raw_config_dict}``.  Each value is the
-            raw sub-table under ``[tools.providers.<category>]`` in the
-            TOML file.
+    属性：
+        enabled_tools：能力名称的显式白名单。空列表表示启用所有成功构建的能力。
+        providers：``{category: raw_config_dict}``，每个值都是 TOML 文件中
+            ``[tools.providers.<category>]`` 下的原始子表。
     """
 
     enabled_tools: list[str] = field(default_factory=list)
@@ -53,18 +49,17 @@ class ToolsConfig:
 
 
 # ---------------------------------------------------------------------------
-# [INTERNAL] Build capability map — walk providers, collect capabilities
+# [内部实现] 构建能力映射——遍历 Provider 并收集能力
 # ---------------------------------------------------------------------------
 
 
 def build_capability_map(config: ToolsConfig) -> dict[str, Capability]:
-    """Walk every registered provider, call ``build()``, and collect
-    capabilities into a ``{name: Capability}`` dict.
+    """遍历每个已注册的 Provider，调用 ``build()``，并将能力收集到
+    ``{name: Capability}`` 字典中。
 
-    Failure isolation: a single provider raising
-    ``ToolProviderConfigError`` is logged and skipped.
+    故障隔离：单个 Provider 抛出 ``ToolProviderConfigError`` 时只记录并跳过。
 
-    Name conflicts across providers: the later provider wins (logged).
+    跨 Provider 名称冲突：使用后加载的 Provider，并记录日志。
     """
     result: dict[str, Capability] = {}
 
@@ -94,15 +89,15 @@ def build_capability_map(config: ToolsConfig) -> dict[str, Capability]:
 
 
 # ---------------------------------------------------------------------------
-# [STABLE] Public entry points
+# [稳定接口] 公共入口
 # ---------------------------------------------------------------------------
 
 
 def get_enabled_capabilities(config: ToolsConfig) -> list[Capability]:
-    """Build the full capability map, then filter by ``enabled_tools``.
+    """构建完整能力映射，然后按 ``enabled_tools`` 过滤。
 
-    * ``enabled_tools`` is empty → return **all** capabilities.
-    * Unknown names in ``enabled_tools`` are logged as WARNING and dropped.
+    * ``enabled_tools`` 为空 → 返回**全部**能力。
+    * ``enabled_tools`` 中的未知名称会记录为 WARNING 并被丢弃。
     """
     cap_map = build_capability_map(config)
 
@@ -125,16 +120,16 @@ def get_enabled_capabilities(config: ToolsConfig) -> list[Capability]:
 
 
 def bootstrap_capabilities(config: ToolsConfig) -> None:
-    """The single public entry point: build, filter, and write every
-    enabled capability into the global ``capability_registry``.
+    """唯一公共入口：构建、过滤并将所有启用能力写入全局
+    ``capability_registry``。
 
-    Must be called exactly once per process lifetime, **before**
-    ``react_agent_factory.initialize_react_agent()``, so that the
-    ReAct inner subgraph captures a non-empty tool list.
+    每个进程生命周期必须且只能调用一次，并且要在
+    ``react_agent_factory.initialize_react_agent()`` **之前**调用，以确保
+    ReAct 内部子图能获取非空工具列表。
 
-    Raises:
-        ValueError: If a capability name is already registered (usually
-            means this function was called twice — Fail-Fast).
+    异常：
+        ValueError：能力名称已注册时抛出，通常表示本函数被重复调用；系统会
+            快速失败。
     """
     capabilities = get_enabled_capabilities(config)
 
@@ -153,5 +148,5 @@ def bootstrap_capabilities(config: ToolsConfig) -> None:
 
 
 def _reset_capabilities_for_testing() -> None:
-    """[TEST-ONLY] Clear the global ``capability_registry`` between tests."""
+    """[仅测试] 在测试之间清空全局 ``capability_registry``。"""
     clear_registry()

@@ -1,4 +1,4 @@
-"""Runtime telemetry collector and context propagation."""
+"""运行时遥测采集器与上下文传播。"""
 
 from __future__ import annotations
 
@@ -151,7 +151,7 @@ def get_telemetry() -> TelemetryCollector:
 
 
 def current_task_id() -> str | None:
-    """Return the active task identity for task-scoped stores and tools."""
+    """返回供任务级存储和工具使用的当前任务标识。"""
     task_id = _task_id_var.get()
     if task_id is not None:
         return task_id

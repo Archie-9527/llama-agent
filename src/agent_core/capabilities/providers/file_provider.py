@@ -1,4 +1,4 @@
-"""Deterministic, read-only local file capabilities."""
+"""确定性的只读本地文件能力。"""
 
 from __future__ import annotations
 

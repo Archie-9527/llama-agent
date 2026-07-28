@@ -39,7 +39,7 @@ from agent_core.exceptions import (
 )
 
 # ---------------------------------------------------------------------------
-# [INTERNAL] Message-format conversion helpers
+# [内部实现] 消息格式转换辅助函数
 # ---------------------------------------------------------------------------
 
 # 将 LangChain 消息格式转换为 llama_cpp 消息格式
@@ -75,7 +75,7 @@ def _convert_messages_to_llama_format(
             "content": content,
         }
 
-        # Forward tool_calls from assistant messages
+        # 转发助手消息中的 tool_calls
         if role == "assistant" and isinstance(msg, AIMessage) and msg.tool_calls:
             entry["tool_calls"] = [
                 {
@@ -89,7 +89,7 @@ def _convert_messages_to_llama_format(
                 for tc in msg.tool_calls
             ]  # type: ignore[typeddict-item]
 
-        # Forward tool_call_id from tool messages
+        # 转发工具消息中的 tool_call_id
         if role == "tool" and isinstance(msg, ToolMessage):
             entry["tool_call_id"] = msg.tool_call_id  # type: ignore[typeddict-item]
 
@@ -152,7 +152,7 @@ def _convert_llama_response_to_aimessage(
             )
         )
 
-    # Fallback: parse legacy function_call if present but tool_calls is empty
+    # 后备处理：存在旧版 function_call 但 tool_calls 为空时进行解析
     if not tool_calls and msg_data.get("function_call"):
         fc = msg_data["function_call"]
         try:
@@ -191,10 +191,10 @@ def _convert_llama_response_to_aimessage(
 
 
 def _strip_thinking_content(content: str) -> tuple[str, str]:
-    """Separate Qwen-style ``<think>`` blocks from user-visible content.
+    """将 Qwen 风格的 ``<think>`` 块与用户可见内容分离。
 
-    An unmatched opening tag means generation ended while still reasoning.
-    That unfinished suffix is reasoning, not a final answer.
+    开始标签没有匹配的结束标签，表示生成在推理过程中结束。未完成的后缀属于
+    推理内容，不是最终回答。
     """
     if not content:
         return "", ""
@@ -216,7 +216,7 @@ def _strip_thinking_content(content: str) -> tuple[str, str]:
 def _append_no_think_marker(
     messages: List[llama_cpp.llama_types.ChatCompletionRequestMessage],
 ) -> List[llama_cpp.llama_types.ChatCompletionRequestMessage]:
-    """Append Qwen's soft switch without mutating LangChain messages."""
+    """追加 Qwen 软开关，同时不修改 LangChain 消息。"""
     if not messages:
         return messages
     copied = [dict(message) for message in messages]
@@ -230,9 +230,9 @@ def _append_no_think_marker(
 def _convert_langchain_tools_to_llama(
     tools: List[Any],
 ) -> List[llama_cpp.llama_types.ChatCompletionTool]:
-    """Convert LangChain tool objects into llama.cpp tool-schema dicts.
+    """将 LangChain 工具对象转换为 llama.cpp 工具 Schema 字典。
 
-    Accepts ``BaseTool`` instances, plain dicts, and callables.
+    接受 ``BaseTool`` 实例、普通字典和可调用对象。
     """
     from langchain_core.utils.function_calling import convert_to_openai_tool
 
@@ -248,7 +248,7 @@ def _convert_langchain_tools_to_llama(
 
 
 # ---------------------------------------------------------------------------
-# [STABLE] JSON Schema → GBNF conversion (sole bridge for grammar_builder)
+# [稳定接口] JSON Schema → GBNF 转换（grammar_builder 的唯一桥梁）
 # ---------------------------------------------------------------------------
 
 
@@ -261,7 +261,7 @@ def compile_json_schema_to_gbnf(schema: dict) -> str:
 
 
 def _read_llama_perf(client: Any) -> dict[str, int | float | None]:
-    """Read cumulative counters reset immediately before the current call."""
+    """读取在当前调用前刚被重置的累计计数器。"""
     if not isinstance(client, llama_cpp.Llama):
         return {
             "prompt_eval_ms": None,
@@ -287,7 +287,7 @@ def _read_llama_perf(client: Any) -> dict[str, int | float | None]:
 
 
 def _reset_llama_perf(client: Any) -> None:
-    """Reset native counters only for a real ``llama_cpp.Llama`` instance."""
+    """仅对真实 ``llama_cpp.Llama`` 实例重置原生计数器。"""
     if not isinstance(client, llama_cpp.Llama):
         return
     try:
@@ -297,7 +297,7 @@ def _reset_llama_perf(client: Any) -> None:
 
 
 # ---------------------------------------------------------------------------
-# [STABLE] ChatLlamaCpp — the core inference model
+# [稳定接口] ChatLlamaCpp——核心推理模型
 # ---------------------------------------------------------------------------
 
 
@@ -309,7 +309,7 @@ class ChatLlamaCpp(BaseChatModel):
     这是整个代理系统的唯一推理入口点，使用单例模式，保证线程安全
     """
 
-    # ---- Pydantic fields (construct-time, config-file friendly) ----------
+    # ---- Pydantic 字段（构造时设置，便于从配置文件加载）------------------
     model_path: str = Field(description="Absolute path to the GGUF model file")
     n_ctx: int = Field(default=4096, description="Context window size in tokens")
     n_gpu_layers: int = Field(
@@ -337,25 +337,25 @@ class ChatLlamaCpp(BaseChatModel):
         description="Append Qwen /no_think and hide reasoning blocks",
     )
 
-    # ---- Private internal state (excluded from pydantic serialisation) ----
+    # ---- 私有内部状态（不参与 Pydantic 序列化）---------------------------
     _client: Optional[llama_cpp.Llama] = PrivateAttr(default=None)
     _lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     # ------------------------------------------------------------------
-    # Construction — eager model loading (fail-fast)
+    # 构造——立即加载模型并快速失败
     # ------------------------------------------------------------------
 
     def __init__(self, **data: Any) -> None:
         super().__init__(**data)
-        self._client = self._load_model()  # [INTERNAL] load now, don't defer
+        self._client = self._load_model()  # [内部实现] 立即加载，不要延迟
 
     def _load_model(self) -> llama_cpp.Llama:
-        """Instantiate the underlying ``llama_cpp.Llama`` object.
+        """实例化底层 ``llama_cpp.Llama`` 对象。
 
-        All ``llama_cpp``-originated exceptions are caught and re-raised as
-        ``ModelLoadError`` so that callers never see raw library types.
+        所有源自 ``llama_cpp`` 的异常都会被捕获并转换为 ``ModelLoadError``，
+        使调用方不会看到原始库异常类型。
         """
         try:
             return llama_cpp.Llama(
@@ -374,7 +374,7 @@ class ChatLlamaCpp(BaseChatModel):
             ) from exc
 
     # ------------------------------------------------------------------
-    # BaseChatModel required properties
+    # BaseChatModel 必需属性
     # ------------------------------------------------------------------
 
     @property
@@ -391,22 +391,21 @@ class ChatLlamaCpp(BaseChatModel):
         }
 
     # ------------------------------------------------------------------
-    # [STABLE] Token counting
+    # [稳定接口] Token 计数
     # ------------------------------------------------------------------
 
     def get_num_tokens(self, text: str) -> int:
-        """Return the exact token count for *text* using the native tokenizer.
+        """使用原生 Tokenizer 返回 *text* 的精确 Token 数。
 
-        This delegates to ``llama_cpp.Llama.tokenize()`` — no character/4
-        approximations.  Used by ``knowledge_scope`` for context-window
-        trimming decisions.
+        本方法委托 ``llama_cpp.Llama.tokenize()``，不使用字符数除以 4 的近似。
+        ``knowledge_scope`` 使用它进行上下文窗口裁剪决策。
         """
         assert self._client is not None
         tokens = self._client.tokenize(text.encode("utf-8"))
         return len(tokens)
 
     # ------------------------------------------------------------------
-    # [STABLE] Tool binding
+    # [稳定接口] 工具绑定
     # ------------------------------------------------------------------
 
     def bind_tools(
@@ -416,12 +415,11 @@ class ChatLlamaCpp(BaseChatModel):
         tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
         **kwargs: Any,
     ) -> Runnable[LanguageModelInput, AIMessage]:
-        """Bind tools to the model so they are available during inference.
+        """将工具绑定到模型，使其在推理期间可用。
 
-        LangChain's ``create_agent()`` (and ``ToolNode``) call this to inform
-        the model which tools exist.  We store the tool schemas so
-        ``_generate`` can forward them to ``llama_cpp``'s native tool-calling
-        support.
+        LangChain 的 ``create_agent()``（以及 ``ToolNode``）调用本方法告知模型
+        存在哪些工具。这里保存工具 Schema，使 ``_generate`` 能将其转发给
+        ``llama_cpp`` 的原生工具调用支持。
         """
         from langchain_core.utils.function_calling import convert_to_openai_tool
 
@@ -435,19 +433,16 @@ class ChatLlamaCpp(BaseChatModel):
                 stored_tools.append(convert_to_openai_tool(t))  # type: ignore[arg-type]
         bind_kwargs = dict(kwargs)
 
-        # LangChain's create_agent() binds ordinary tools with
-        # ``tool_choice=None``.  llama-cpp-python's
-        # ``chatml-function-calling`` handler interprets None as the
-        # *no-tools* branch, even when tool schemas are present.  In that
-        # branch the model only sees our human-readable prompt and tends to
-        # print pseudo calls such as ``tool_name(...)`` as plain text.
+        # LangChain 的 create_agent() 使用 ``tool_choice=None`` 绑定普通工具。
+        # llama-cpp-python 的 ``chatml-function-calling`` Handler 即使收到工具
+        # Schema，也会把 None 解释为“不使用工具”分支。该分支中模型只能看到
+        # 人类可读 Prompt，容易把 ``tool_name(...)`` 等伪调用打印为纯文本。
         #
-        # OpenAI-style "auto" is the correct default for a ReAct agent: the
-        # model may either call a tool or return a normal message, while the
-        # handler emits a structured ``tool_calls`` response for the former.
+        # OpenAI 风格的 "auto" 才是 ReAct Agent 的正确默认值：模型可以调用工具
+        # 或返回普通消息；选择前者时 Handler 会输出结构化 ``tool_calls``。
         resolved_tool_choice = tool_choice if tool_choice is not None else "auto"
-        # LangChain uses "any"/"required" for forced tool selection, while
-        # llama-cpp-python 0.3.x accepts "auto" or a concrete function dict.
+        # LangChain 使用 "any"/"required" 强制选择工具，而 llama-cpp-python
+        # 0.3.x 接受 "auto" 或具体的函数字典。
         if resolved_tool_choice in ("any", "required"):
             resolved_tool_choice = "auto"
         bind_kwargs["tool_choice"] = resolved_tool_choice
@@ -455,7 +450,7 @@ class ChatLlamaCpp(BaseChatModel):
         return self.bind(tools=stored_tools, **bind_kwargs)
 
     # ------------------------------------------------------------------
-    # [STABLE] Synchronous inference
+    # [稳定接口] 同步推理
     # ------------------------------------------------------------------
 
     def _generate(
@@ -465,11 +460,10 @@ class ChatLlamaCpp(BaseChatModel):
         run_manager: Optional[CallbackManagerForLLMRun] = None,
         **kwargs: Any,
     ) -> ChatResult:
-        """Core synchronous inference — called indirectly via ``.invoke()``.
+        """核心同步推理——通过 ``.invoke()`` 间接调用。
 
-        The *grammar* kwarg (if present) is forwarded to llama.cpp to enable
-        constrained decoding (GBNF).  All exceptions from llama.cpp are
-        caught and translated into ``AgentEngineError`` subclasses.
+        *grammar* 关键字参数存在时会转发给 llama.cpp，以启用 GBNF 约束解码。
+        所有 llama.cpp 异常都会被捕获并转换为 ``AgentEngineError`` 子类。
         """
         assert self._client is not None
 
@@ -477,7 +471,7 @@ class ChatLlamaCpp(BaseChatModel):
         if self.disable_thinking:
             llama_messages = _append_no_think_marker(llama_messages)
 
-        # Tools — may come from bind_tools() or be passed at call-time
+        # 工具——可以来自 bind_tools()，也可以在调用时传入
         langchain_tools = kwargs.get("tools") or []
         llama_tools = (
             _convert_langchain_tools_to_llama(langchain_tools)
@@ -490,15 +484,15 @@ class ChatLlamaCpp(BaseChatModel):
         if llama_tools is None:
             llama_messages = _ensure_tool_messages_visible(llama_messages)
 
-        # Stop tokens
+        # 停止 Token
         combined_stop = list(self.stop or [])
         if stop:
             combined_stop.extend(stop)
 
-        # Grammar for constrained decoding
+        # 用于约束解码的 Grammar
         grammar = kwargs.get("grammar", None)
 
-        # ---- Critical section: llama_cpp.Llama is not thread-safe ----
+        # ---- 临界区：llama_cpp.Llama 不是线程安全的 ----------------------
         from agent_core.telemetry import get_telemetry
 
         telemetry = get_telemetry()
@@ -535,7 +529,7 @@ class ChatLlamaCpp(BaseChatModel):
 
                     kv_status = sample_kv(self._client).to_dict()
         except AgentEngineError:
-            raise  # already our type — don't double-wrap
+            raise  # 已经是本项目异常类型，不要重复包装
         except Exception as exc:
             raise AgentEngineError(
                 f"Inference failed: {exc}"
@@ -588,7 +582,7 @@ class ChatLlamaCpp(BaseChatModel):
         return ChatResult(generations=[ChatGeneration(message=ai_message)])
 
     # ------------------------------------------------------------------
-    # [STABLE] Streaming inference
+    # [稳定接口] 流式推理
     # ------------------------------------------------------------------
 
     def _stream(
@@ -598,7 +592,7 @@ class ChatLlamaCpp(BaseChatModel):
         run_manager: Optional[CallbackManagerForLLMRun] = None,
         **kwargs: Any,
     ) -> Iterator[ChatGenerationChunk]:
-        """Token-level streaming — called indirectly via ``.stream()``."""
+        """Token 级流式推理——通过 ``.stream()`` 间接调用。"""
         assert self._client is not None
 
         llama_messages = _convert_messages_to_llama_format(messages)
@@ -644,7 +638,7 @@ class ChatLlamaCpp(BaseChatModel):
                     delta = choices[0].get("delta") or {}
                     content = delta.get("content")
                     if content:
-                        # llama.cpp streaming accumulates content — emit deltas
+                        # llama.cpp 流式响应会累积内容，此处只发出增量
                         delta_text = (
                             content[len(prev_text):]
                             if content.startswith(prev_text)
@@ -665,19 +659,17 @@ class ChatLlamaCpp(BaseChatModel):
 
 
 # ---------------------------------------------------------------------------
-# [STABLE] EngineConfig — typed contract for ChatLlamaCpp construction
+# [稳定接口] EngineConfig——构造 ChatLlamaCpp 的带类型契约
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class EngineConfig:
-    """Typed, immutable configuration for ``ChatLlamaCpp``.
+    """``ChatLlamaCpp`` 的带类型不可变配置。
 
-    This is the single place that declares which parameters the engine
-    needs.  Field names must stay in sync with ``ChatLlamaCpp``'s
-    pydantic fields.
+    这里是声明引擎所需参数的唯一位置，字段名称必须与 ``ChatLlamaCpp`` 的
+    Pydantic 字段保持同步。
 
-    ``model_path`` is the only field without a default — it must be
-    provided by the caller.
+    ``model_path`` 是唯一没有默认值的字段，必须由调用方提供。
     """
 
     model_path: str
@@ -698,10 +690,10 @@ class EngineConfig:
     disable_thinking: bool = False
 
     def validate(self) -> None:
-        """Fail-fast check before constructing the expensive ``ChatLlamaCpp``.
+        """构造开销较大的 ``ChatLlamaCpp`` 之前执行快速失败检查。
 
-        Raises:
-            EngineConfigError: If ``model_path`` is empty or whitespace-only.
+        异常：
+            EngineConfigError：``model_path`` 为空或只包含空白时抛出。
         """
         if not self.model_path or not self.model_path.strip():
             raise EngineConfigError(
@@ -713,7 +705,7 @@ class EngineConfig:
 
 
 # ---------------------------------------------------------------------------
-# [STABLE] Global singleton — initialise once, get many times
+# [稳定接口] 全局单例——初始化一次，多次获取
 # ---------------------------------------------------------------------------
 
 _engine_instance: Optional[ChatLlamaCpp] = None
@@ -721,21 +713,21 @@ _engine_lock = threading.Lock()
 
 
 def initialize_engine(config: EngineConfig) -> ChatLlamaCpp:
-    """One-shot, process-level engine initialisation.
+    """进程级的一次性引擎初始化。
 
-    Must be called by the CLI layer (``cli.py``) during startup, before
-    any ``graph/`` node attempts to call ``get_engine()``.
+    必须由 CLI 层（``cli.py``）在启动期间调用，且要早于任何 ``graph/`` 节点
+    尝试调用 ``get_engine()``。
 
-    Args:
-        config: Fully merged ``EngineConfig`` (all four layers resolved).
+    参数：
+        config：完整合并后的 ``EngineConfig``，四个配置层均已解析。
 
-    Returns:
-        The newly created ``ChatLlamaCpp`` singleton instance.
+    返回：
+        新创建的 ``ChatLlamaCpp`` 单例实例。
 
-    Raises:
-        EngineConfigError: ``config.model_path`` is missing or empty.
-        EngineAlreadyInitializedError: The singleton was already created.
-        ModelLoadError: The underlying ``llama_cpp.Llama`` constructor failed.
+    异常：
+        EngineConfigError：``config.model_path`` 缺失或为空。
+        EngineAlreadyInitializedError：单例已经创建。
+        ModelLoadError：底层 ``llama_cpp.Llama`` 构造失败。
     """
     global _engine_instance
 
@@ -753,15 +745,13 @@ def initialize_engine(config: EngineConfig) -> ChatLlamaCpp:
 
 
 def get_engine() -> ChatLlamaCpp:
-    """Return the previously initialised engine singleton.
+    """返回之前初始化的引擎单例。
 
-    This function accepts **no arguments**.  If the engine has not been
-    initialised yet it raises ``EngineNotInitializedError`` rather than
-    silently constructing one with default (empty) parameters.
+    本函数**不接收任何参数**。如果引擎尚未初始化，会抛出
+    ``EngineNotInitializedError``，而不是用默认空参数静默构造实例。
 
-    Raises:
-        EngineNotInitializedError: ``initialize_engine()`` has not been
-            called yet.
+    异常：
+        EngineNotInitializedError：尚未调用 ``initialize_engine()``。
     """
     if _engine_instance is None:
         raise EngineNotInitializedError(
@@ -773,10 +763,10 @@ def get_engine() -> ChatLlamaCpp:
 
 
 def _reset_engine_for_testing() -> None:
-    """[TEST-ONLY] Clear the singleton so a fresh engine can be created.
+    """[仅测试] 清除单例，以便创建全新引擎。
 
-    Do **not** call this from production code.  The leading underscore
-    and the name suffix are deliberate signals that this is a test hook.
+    **不要**从生产代码调用。本函数名称的前导下划线和后缀有意表明它是测试
+    Hook。
     """
     global _engine_instance
     with _engine_lock:

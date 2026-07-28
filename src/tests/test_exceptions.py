@@ -1,9 +1,9 @@
-"""Tests for exceptions.py — verify the unified exception hierarchy.
+"""测试 exceptions.py，验证统一的异常层级。
 
-Covers:
-  - AgentCoreError is the root for all exceptions.
-  - AgentEngineError, PromptAssemblyError, GrammarCompileError → AgentCoreError.
-  - All legacy types still work for backward compat.
+覆盖范围：
+  - AgentCoreError 是所有内部异常的根类。
+  - AgentEngineError、PromptAssemblyError、GrammarCompileError 均继承 AgentCoreError。
+  - 所有旧异常类型仍保持向后兼容。
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from agent_core.exceptions import (
 
 
 class TestExceptionHierarchy:
-    """Verify the unified root and correct MRO for each exception class."""
+    """验证统一根类以及各异常类的正确方法解析顺序。"""
 
     def test_agent_core_error_is_root(self):
         assert issubclass(AgentEngineError, AgentCoreError)
@@ -44,7 +44,7 @@ class TestExceptionHierarchy:
         assert issubclass(ToolConsistencyError, PromptAssemblyError)
 
     def test_can_catch_all_via_agent_core_error(self):
-        """A single 'except AgentCoreError' should catch any internal exception."""
+        """单个 ``except AgentCoreError`` 应能捕获任意内部异常。"""
         for exc_cls in [
             AgentEngineError, ModelLoadError, InferenceTimeoutError,
             GrammarCompileError, PromptAssemblyError,
@@ -53,17 +53,17 @@ class TestExceptionHierarchy:
             try:
                 raise exc_cls("test")
             except AgentCoreError:
-                pass  # expected
+                pass  # 符合预期
             else:
                 pytest.fail(f"{exc_cls.__name__} not caught by AgentCoreError")
 
     def test_builtin_exception_not_caught(self):
-        """AgentCoreError should NOT catch plain Exception/ValueError."""
+        """AgentCoreError 不应捕获普通的 Exception/ValueError。"""
         with pytest.raises(ValueError):
             try:
                 raise ValueError("not ours")
             except AgentCoreError:
-                pass  # should not happen
+                pass  # 不应执行到此处
 
 
 import pytest

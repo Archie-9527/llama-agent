@@ -1,11 +1,11 @@
-"""Tests for CLI layer, config layer, and llm_engine v2 refactor.
+"""测试 CLI 层、配置层以及 llm_engine v2 重构。
 
-Covers acceptance criteria:
-    E1–E10  — llm_engine.py singleton refactor
-    C1–C14  — AppConfig loading
-    E-C1–E-C8 — EngineConfig loading
-    L1–L22  — cli.py behaviour
-    I1–I3   — cross-module integration
+覆盖验收标准：
+    E1–E10  — llm_engine.py 单例重构
+    C1–C14  — AppConfig 加载
+    E-C1–E-C8 — EngineConfig 加载
+    L1–L22  — cli.py 行为
+    I1–I3   — 跨模块集成
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ from agent_core.cli import (
 )
 
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
+# ── 辅助函数 ─────────────────────────────────────────────────────────────────
 
 
 def _write_toml(path: Path, content: str) -> None:
@@ -114,12 +114,12 @@ def test_ablation_parser_accepts_repeated_case_filters():
     assert args.measured_runs == 1
 
 
-# ── Fixtures ─────────────────────────────────────────────────────────────────
+# ── 测试夹具 ─────────────────────────────────────────────────────────────────
 
 
 @pytest.fixture(autouse=True)
 def _reset_engine():
-    """Always reset the engine singleton before each test."""
+    """每项测试前后均重置引擎单例。"""
     _reset_engine_for_testing()
     yield
     _reset_engine_for_testing()
@@ -127,7 +127,7 @@ def _reset_engine():
 
 @pytest.fixture(autouse=True)
 def _clear_env():
-    """Remove all AGENT_* vars for test isolation."""
+    """移除所有 AGENT_* 环境变量，确保测试相互隔离。"""
     saved = {k: v for k, v in os.environ.items() if k.startswith(ENV_PREFIX)}
     for k in saved:
         del os.environ[k]
@@ -137,12 +137,12 @@ def _clear_env():
 
 
 # ============================================================================
-# E1–E10  llm_engine singleton refactor
+# E1–E10  llm_engine 单例重构
 # ============================================================================
 
 
 class TestEngineSingleton:
-    """E1–E10: initialize_engine / get_engine lifecycle."""
+    """E1–E10：initialize_engine/get_engine 生命周期。"""
 
     # E1
     def test_get_engine_before_init_raises(self):
@@ -203,7 +203,7 @@ class TestEngineSingleton:
 
     # E8
     def test_engine_config_and_chat_llama_cpp_fields_aligned(self):
-        """Key constructor fields must appear in EngineConfig."""
+        """关键构造参数必须出现在 EngineConfig 中。"""
         ec_fields = {
             f.name for f in EngineConfig.__dataclass_fields__.values()
         }
@@ -216,14 +216,14 @@ class TestEngineSingleton:
 
     # E9
     def test_get_engine_accepts_no_args(self):
-        """Static check — get_engine() has no parameters beyond self-equivalent."""
+        """静态检查：get_engine() 不接受任何参数。"""
         import inspect
         sig = inspect.signature(get_engine)
         assert not sig.parameters
 
     # E10
     def test_thread_safety_multiple_initializers(self):
-        """Only one thread should succeed; all others get EngineAlreadyInitializedError."""
+        """仅允许一个线程初始化成功，其余线程均应收到重复初始化异常。"""
         errors: list = []
         instances: list = []
         barrier = threading.Barrier(5, timeout=5)
@@ -254,12 +254,12 @@ class TestEngineSingleton:
 
 
 # ============================================================================
-# C1–C14  AppConfig loading
+# C1–C14  AppConfig 加载
 # ============================================================================
 
 
 class TestAppConfigLoading:
-    """C1–C14: AppConfig merge logic."""
+    """C1–C14：AppConfig 合并逻辑。"""
 
     # C1
     def test_all_defaults(self):
@@ -275,7 +275,7 @@ class TestAppConfigLoading:
         _write_toml(f, "[agent]\nmax_iterations = 10\n")
         cfg = load_app_config(config_file=f)
         assert cfg.max_iterations == 10
-        assert cfg.log_level == "INFO"  # default
+        assert cfg.log_level == "INFO"  # 默认值
 
     # C3
     def test_explicit_file_missing_raises(self):
@@ -284,17 +284,17 @@ class TestAppConfigLoading:
 
     # C4
     def test_implicit_search_all_missing(self):
-        # Default search paths shouldn't exist in test
+        # 测试环境中不应存在默认搜索路径。
         cfg = load_app_config(config_file=None)
         assert cfg.max_iterations == 6
 
     # C5
     def test_flat_toml_ignored(self, tmp_path):
-        """Flat keys (no [agent] section) are silently ignored."""
+        """静默忽略不在 [agent] 节中的扁平键。"""
         f = tmp_path / "flat.toml"
         _write_toml(f, "max_iterations = 99\n")
         cfg = load_app_config(config_file=f)
-        assert cfg.max_iterations == 6  # not 99
+        assert cfg.max_iterations == 6  # 不应为 99
 
     # C6
     def test_env_overrides_file(self, tmp_path):
@@ -360,7 +360,7 @@ class TestAppConfigLoading:
         with patch("agent_core.config.tomllib", None):
             with caplog.at_level(logging.WARNING, logger="agent_core.config"):
                 cfg = load_app_config(config_file=f)
-        # Falls back to defaults
+        # 回退到默认值。
         assert cfg.max_iterations == 6
 
     # C14
@@ -371,12 +371,12 @@ class TestAppConfigLoading:
 
 
 # ============================================================================
-# E-C1–E-C8  EngineConfig loading
+# E-C1–E-C8  EngineConfig 加载
 # ============================================================================
 
 
 class TestEngineConfigLoading:
-    """E-C1–E-C8: EngineConfig merge logic."""
+    """E-C1–E-C8：EngineConfig 合并逻辑。"""
 
     def _minimal_toml(self, tmp_path):
         f = tmp_path / "ec.toml"
@@ -389,7 +389,7 @@ class TestEngineConfigLoading:
         cfg = load_engine_config(config_file=f)
         assert cfg.model_path == "/models/x.gguf"
         assert cfg.n_ctx == 8192
-        assert cfg.n_gpu_layers == 0  # default
+        assert cfg.n_gpu_layers == 0  # 默认值
 
     # E-C2
     def test_missing_model_path_raises(self, tmp_path):
@@ -451,7 +451,7 @@ class TestEngineConfigLoading:
 
 
 # ============================================================================
-# _cast_layer and _load_env_layer unit tests
+# _cast_layer 与 _load_env_layer 单元测试
 # ============================================================================
 
 
@@ -477,7 +477,7 @@ class TestHelpers:
             _cast_layer({"max_iterations": "not-a-number"}, _APP_FIELD_CASTERS)
 
     def test_resolve_config_file_none_returns_empty(self, tmp_path):
-        # Create a config somewhere outside default search paths
+        # 在默认搜索路径以外创建配置文件。
         f = tmp_path / "somewhere" / "cfg.toml"
         _write_toml(f, "[agent]\nmax_iterations = 99\n")
         result = _resolve_config_file(config_file=f)
@@ -485,12 +485,12 @@ class TestHelpers:
 
 
 # ============================================================================
-# L1–L22  CLI integration tests
+# L1–L22  CLI 集成测试
 # ============================================================================
 
 
 class TestCLI:
-    """L1–L22: cli.py behaviour with mocked dependencies."""
+    """L1–L22：使用模拟依赖测试 cli.py 的行为。"""
 
     _mock_result = {
         "task_goal": "test",
@@ -507,7 +507,7 @@ class TestCLI:
 
     @pytest.fixture(autouse=True)
     def _mocks(self):
-        """Mock all heavy dependencies so tests run without a real model."""
+        """模拟全部重量级依赖，使测试无需真实模型即可运行。"""
         os.environ["AGENT_MODEL_PATH"] = "/fake-test.gguf"
         with patch(
             "agent_core.cli.initialize_engine", return_value=MagicMock()
@@ -583,7 +583,7 @@ class TestCLI:
         mock_init, _ = _mocks
         f = tmp_path / "sc.toml"
         _write_toml(f, '[engine]\nmodel_path = "/m.gguf"\n')
-        # Verify show-config with engine config doesn't crash
+        # 验证带引擎配置运行 show-config 时不会崩溃。
         rc = main(["--config", str(f), "show-config"])
         assert rc == EXIT_OK
 
@@ -604,9 +604,9 @@ class TestCLI:
 
     # L11
     def test_missing_model_path_returns_business_error(self, _mocks):
-        """ValueError from load_engine_config is NOT an AgentEngineError."""
-        # The fixture sets AGENT_MODEL_PATH, so engine config loads fine.
-        # We must force load_engine_config to raise ValueError.
+        """load_engine_config 抛出的 ValueError 并非 AgentEngineError。"""
+        # 测试夹具设置了 AGENT_MODEL_PATH，因此引擎配置可正常加载。
+        # 这里必须强制 load_engine_config 抛出 ValueError。
         with patch(
             "agent_core.cli.load_engine_config",
             side_effect=ValueError("engine.model_path is not configured"),
@@ -626,7 +626,7 @@ class TestCLI:
     # L13
     def test_db_path_cli_propagates(self, _mocks, tmp_path):
         _, mock_runner_cls = _mocks
-        # Patch TaskRunner at the cli module level
+        # 在 cli 模块层级替换 TaskRunner。
         f = tmp_path / "cfg.toml"
         _write_toml(f, '[engine]\nmodel_path = "/m.gguf"\n')
         with patch("agent_core.cli.TaskRunner") as mock_tr_cls:
@@ -657,7 +657,7 @@ class TestCLI:
 
         mock_init.side_effect = _track_init
 
-        # mock_runner is already patched at class level, need close too
+        # mock_runner 已在类级别替换，这里也需要模拟 close。
         mock_runner.close = MagicMock()
 
         def _track_tr(*args, **kwargs):
@@ -693,8 +693,8 @@ class TestCLI:
     # L19
     def test_log_level_propagates(self, _mocks):
         mock_init, _ = _mocks
-        # _setup_logging calls basicConfig which only affects the root logger
-        # if no handler was configured before.  Just verify no crash.
+        # _setup_logging 调用 basicConfig；仅当根日志记录器尚未配置处理器时
+        # 才会生效。这里只验证调用不会崩溃。
         rc = main(["--log-level", "DEBUG", "run", "x"])
         assert rc == EXIT_OK
 
@@ -711,7 +711,7 @@ class TestCLI:
 
     # L21
     def test_architecture_isolation(self):
-        """cli.py must not import agent_core.graph or get_engine."""
+        """cli.py 不得导入 agent_core.graph 或 get_engine。"""
         cli_src = (
             Path(__file__).resolve().parent.parent
             / "agent_core" / "cli.py"
@@ -722,11 +722,11 @@ class TestCLI:
             if line.startswith("import ") or line.startswith("from ")
         ]
         imports = "\n".join(import_lines)
-        # Must not import graph/
+        # 不得导入 graph/。
         assert "agent_core.graph" not in imports, (
             f"cli.py must not import graph/:\n{imports}"
         )
-        # Must not import get_engine
+        # 不得导入 get_engine。
         assert "get_engine" not in imports, (
             f"cli.py must not import get_engine:\n{imports}"
         )
@@ -740,12 +740,12 @@ class TestCLI:
 
 
 # ============================================================================
-# I1–I3  Cross-module integration
+# I1–I3  跨模块集成
 # ============================================================================
 
 
 class TestIntegration:
-    """I1–I3: End-to-end config → engine → graph integration."""
+    """I1–I3：配置→引擎→图的端到端集成。"""
 
     def _setup_minimal_config(self, tmp_path):
         f = tmp_path / "integ.toml"
@@ -758,7 +758,7 @@ class TestIntegration:
 
     # I1
     def test_full_cold_start(self, tmp_path):
-        """I1: full cold-start flow with mocked llama_cpp.Llama."""
+        """I1：使用模拟 llama_cpp.Llama 验证完整冷启动流程。"""
         cf = self._setup_minimal_config(tmp_path)
 
         with patch(
@@ -787,7 +787,7 @@ class TestIntegration:
 
     # I2
     def test_engine_singleton_persists(self, tmp_path):
-        """I2: Same process, run then resume — engine singleton stays."""
+        """I2：在同一进程中先运行再恢复，引擎单例保持不变。"""
         cf = self._setup_minimal_config(tmp_path)
 
         with patch(
@@ -806,14 +806,14 @@ class TestIntegration:
             mock_tr_cls.return_value = mock_runner
 
             main(["--config", str(cf), "run", "first"])
-            # get_engine should now work
+            # 此时 get_engine 应可正常工作。
             eng = get_engine()
             main(["--config", str(cf), "resume", "tid1"])
             assert get_engine() is eng
 
     # I3
     def test_engine_config_params_reach_chat_llama_cpp(self):
-        """I3: EngineConfig merges correctly into ChatLlamaCpp kwargs."""
+        """I3：EngineConfig 正确合并到 ChatLlamaCpp 的关键字参数中。"""
         captured: list = []
 
         def _capture_init(**kwargs):

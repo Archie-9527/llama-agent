@@ -1,4 +1,4 @@
-"""Typed records shared by the R2 context policy and persistence layer."""
+"""R2 上下文策略与持久化层共享的带类型记录。"""
 
 from __future__ import annotations
 

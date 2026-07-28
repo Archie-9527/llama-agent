@@ -1,8 +1,7 @@
-"""Planner node — decompose the user's task goal into ordered steps.
+"""Planner 节点——将用户任务目标拆分为有序步骤。
 
-The Planner is the entry point of the outer graph.  It calls the LLM
-with a GBNF grammar that constrains the output to a JSON object
-containing a ``steps`` array, guaranteeing parseable output.
+Planner 是外层图的入口。它使用 GBNF Grammar 调用 LLM，将输出约束为包含
+``steps`` 数组的 JSON 对象，从而保证结果可解析。
 """
 
 from __future__ import annotations
@@ -21,8 +20,8 @@ if TYPE_CHECKING:
     from agent_core.graph.state import AgentState
 
 # ---------------------------------------------------------------------------
-# JSON Schema that constrains the Planner's LLM output.
-# The model MUST emit ``{"steps": ["step 1", "step 2", ...]}``.
+# 约束 Planner LLM 输出的 JSON Schema。
+# 模型必须输出 ``{"steps": ["step 1", "step 2", ...]}``。
 # ---------------------------------------------------------------------------
 
 PLAN_SCHEMA: dict = {
@@ -40,7 +39,7 @@ PLAN_SCHEMA: dict = {
 
 
 def _explicit_tool_sequence(task_goal: str) -> list[str]:
-    """Extract non-negated, imperative tool requirements in user order."""
+    """按用户顺序提取未被否定的命令式工具要求。"""
     from agent_core.capability_registry import list_capabilities
 
     names = {cap.name for cap in list_capabilities()}
@@ -96,12 +95,11 @@ def _enforce_explicit_tool_sequence(
     steps: list[str],
     executed_tools: list[str] | None = None,
 ) -> list[str]:
-    """Preserve every explicitly requested tool call as an atomic plan step.
+    """将每个显式要求的工具调用保留为原子计划步骤。
 
-    Small local models sometimes collapse a mandated two-tool workflow into
-    the first call plus a textual answer.  This deterministic post-condition
-    does not invent tools: it only restores calls explicitly named by the
-    user, including repeated calls, in the user's order.
+    小型本地模型有时会把强制的双工具工作流压缩成第一次调用加文本回答。这个
+    确定性后置条件不会虚构工具，只会按用户顺序恢复其明确指定的调用，包括
+    重复调用。
     """
     required = _explicit_tool_sequence(task_goal)
     explicitly_named_tools = set(required)
@@ -139,8 +137,7 @@ def _enforce_explicit_tool_sequence(
     for index, step in enumerate(steps):
         if index in consumed:
             continue
-        # Do not retain duplicate/replayed versions of an explicitly mandated
-        # call after its required occurrence has already been placed.
+        # 显式强制调用的必要实例已经放入计划后，不再保留其重复或重放版本。
         if _step_target_tool(step, explicitly_named_tools) is not None:
             continue
         ordered.append(step)
@@ -170,12 +167,10 @@ _NO_TOOL_PATTERN = re.compile(
 
 
 def _is_tool_free_conversation_intent(state: "AgentState") -> bool:
-    """Identify conversation-memory turns that must not acquire tools.
+    """识别不得引入工具的会话记忆轮次。
 
-    Explicit tool requests always win.  This guard only handles turns whose
-    language declares, corrects, recalls or summarizes conversation facts.
-    It prevents a local model from turning a fact correction into an invented
-    file edit or service restart.
+    显式工具请求始终优先。本保护只处理声明、修正、召回或总结会话事实的轮次，
+    防止本地模型把事实修正变成虚构的文件编辑或服务重启。
     """
     if not state.get("conversation_id"):
         return False
@@ -196,33 +191,32 @@ def _is_tool_free_conversation_intent(state: "AgentState") -> bool:
 
 
 # ---------------------------------------------------------------------------
-# [STABLE] planner_node
+# [稳定接口] planner_node
 # ---------------------------------------------------------------------------
 
 
 def planner_node(state: "AgentState") -> "AgentState":
-    """Generate or update the plan for the current task.
+    """生成或更新当前任务的计划。
 
-    Steps:
-        1. Assemble the planning prompt (task goal + reflection notes + tools).
-        2. Build a GBNF grammar that forces JSON ``{"steps": [...]}`` output.
-        3. Invoke the engine and parse the result.
-        4. Write ``plan_steps``, reset ``current_step_index`` to 0,
-           and transition ``status`` to ``"executing"``.
+    步骤：
+        1. 组装规划 Prompt（任务目标 + 反思记录 + 工具）。
+        2. 构建强制输出 JSON ``{"steps": [...]}`` 的 GBNF Grammar。
+        3. 调用引擎并解析结果。
+        4. 写入 ``plan_steps``，将 ``current_step_index`` 重置为 0，并把
+           ``status`` 转换为 ``"executing"``。
 
-    Returns:
-        *state* mutated with the new plan.
+    返回：
+        写入新计划后的 *state*。
 
-    Raises:
-        PlanningError: If the LLM output cannot be parsed as a valid plan
-            (malformed JSON, missing ``steps`` key, or empty step list).
+    异常：
+        PlanningError：LLM 输出无法解析为有效计划时抛出，例如 JSON 格式错误、
+            缺少 ``steps`` 键或步骤列表为空。
     """
     current_input = str(
         state.get("current_user_input") or state.get("task_goal", "")
     )
-    # Conversation-only turns do not need a model-generated execution plan.
-    # Short-circuit before get_engine()/invoke so R2 memory conversations do
-    # not pay for a redundant Planner inference that is discarded below.
+    # 纯会话轮次不需要模型生成执行计划。在 get_engine()/invoke 之前短路，
+    # 避免 R2 记忆会话承担一次随后会被丢弃的冗余 Planner 推理。
     if _is_tool_free_conversation_intent(state):
         state["plan_steps"] = [f"直接处理当前会话请求：{current_input}"]
         state["current_step_index"] = 0
@@ -235,7 +229,7 @@ def planner_node(state: "AgentState") -> "AgentState":
 
     response = engine.invoke(messages, grammar=grammar)
 
-    # Parse the constrained JSON output
+    # 解析受约束的 JSON 输出
     try:
         parsed = json.loads(response.content)
         steps: list[str] = parsed["steps"]
@@ -247,7 +241,7 @@ def planner_node(state: "AgentState") -> "AgentState":
             f"{response.content!r}"
         ) from exc
 
-    # Validate each step is a non-empty string
+    # 校验每个步骤都是非空字符串
     for i, step in enumerate(steps):
         if not isinstance(step, str) or not step.strip():
             raise PlanningError(

@@ -1,4 +1,4 @@
-"""SQLite persistence for compact task and conversation context."""
+"""使用 SQLite 持久化紧凑的任务与会话上下文。"""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ def _utc_now() -> str:
 
 
 class ContextStore:
-    """Persist archived context with strict owner isolation."""
+    """在严格的所有者隔离下持久化已归档上下文。"""
 
     def __init__(self, path: Path) -> None:
         self.path = path.resolve()
@@ -73,8 +73,7 @@ class ContextStore:
         artifact_ids: tuple[str, ...] = (),
     ) -> ContextItem:
         digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
-        # A deterministic source key makes lifecycle commits idempotent across
-        # retries and checkpoint resume.
+        # 确定性的来源键保证生命周期提交在重试和 Checkpoint 恢复时具有幂等性。
         stable = "|".join(
             [owner_type, owner_id, source_type, source_id or "", digest]
         )

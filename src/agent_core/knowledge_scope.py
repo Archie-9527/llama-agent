@@ -18,16 +18,16 @@ from agent_core.exceptions import ContextBudgetExceededError
 
 
 # ---------------------------------------------------------------------------
-# [STABLE] Minimal interface for token counting
+# [稳定接口] Token 计数的最小接口
 # ---------------------------------------------------------------------------
 
 
 @runtime_checkable
 class TokenCounter(Protocol):
-    """Protocol for anything that can count tokens in a string.
+    """任何能够统计字符串 Token 数的对象所需实现的 Protocol。
 
-    ``ChatLlamaCpp`` satisfies this via ``get_num_tokens()``, but unit
-    tests can pass a lightweight stub instead.
+    ``ChatLlamaCpp`` 通过 ``get_num_tokens()`` 满足该接口，单元测试也可传入
+    轻量 Stub。
     """
 
     def get_num_tokens(self, text: str) -> int:
@@ -35,7 +35,7 @@ class TokenCounter(Protocol):
 
 
 # ---------------------------------------------------------------------------
-# [STABLE] Public API
+# [稳定接口] 公共 API
 # ---------------------------------------------------------------------------
 
 
@@ -45,30 +45,26 @@ def truncate_history(
     engine: TokenCounter,
     protected_prefix: int = 1,
 ) -> list[BaseMessage]:
-    """Trim *messages* to fit within *max_tokens* tokens.
+    """裁剪 *messages*，使其不超过 *max_tokens* 个 Token。
 
-    Trimming starts from the oldest messages (after *protected_prefix*)
-    and prefers the most recent conversation turns.  When an
-    ``AIMessage(tool_calls=…)`` is removed, the immediately following
-    ``ToolMessage`` with a matching ``tool_call_id`` is removed as well
-    (and vice-versa) — tool-call pairs are always deleted together.
+    从 *protected_prefix* 之后最旧的消息开始裁剪，优先保留最近的会话轮次。
+    删除 ``AIMessage(tool_calls=…)`` 时，也会删除紧随其后且
+    ``tool_call_id`` 匹配的 ``ToolMessage``，反之亦然；工具调用对始终一起删除。
 
-    Args:
-        messages: The full message list to trim.
-        max_tokens: Hard token budget (must be ≥ 0).
-        engine: Any object satisfying ``TokenCounter``.
-        protected_prefix: Number of leading messages that are **never**
-            trimmed (default 1 — protects the ``SystemMessage``).
+    参数：
+        messages：需要裁剪的完整消息列表。
+        max_tokens：硬性 Token 预算，必须大于等于 0。
+        engine：满足 ``TokenCounter`` 的任意对象。
+        protected_prefix：永远不会被裁剪的前导消息数量，默认为 1，用于保护
+            ``SystemMessage``。
 
-    Returns:
-        A (possibly shorter) message list whose total token count ≤
-        *max_tokens*.
+    返回：
+        总 Token 数不超过 *max_tokens* 的消息列表，长度可能缩短。
 
-    Raises:
-        ContextBudgetExceededError: If the budget cannot be met even
-            after removing everything but the protected prefix — the
-            remaining messages are simply too large.
-        ValueError: If *max_tokens* is negative.
+    异常：
+        ContextBudgetExceededError：除受保护前缀外的内容全部删除后仍无法满足预算
+            时抛出，说明剩余消息本身过大。
+        ValueError：*max_tokens* 为负数时抛出。
     """
     if max_tokens < 0:
         raise ValueError("max_tokens must be ≥ 0")
@@ -76,38 +72,37 @@ def truncate_history(
     if not messages:
         return []
 
-    # Fast path — already within budget
+    # 快速路径——当前内容已在预算内
     if _total_tokens(messages, engine) <= max_tokens:
         return list(messages)
 
-    # Split into protected head + trimmable tail
+    # 拆分为受保护头部和可裁剪尾部
     protected = list(messages[:protected_prefix])
     trimmable = list(messages[protected_prefix:])
 
     if not trimmable:
         return _fail_if_over_budget(protected, max_tokens, engine)
 
-    # Work from the oldest end (index 0 of trimmable) toward the newest
+    # 从最旧端（trimmable 的索引 0）向最新端处理
     idx = 0
     while idx < len(trimmable) and _total_tokens(protected + trimmable, engine) > max_tokens:
         removed = _pop_tool_call_pair(trimmable, idx)
         if removed is None:
-            # No pair — just delete the single message
+            # 不属于配对，只删除当前单条消息
             del trimmable[idx]
-        # When a pair is removed we stay at the same idx because the next
-        # message shifted into this position.
+        # 删除配对后保持同一 idx，因为下一条消息会移动到当前位置。
 
     result = protected + trimmable
     return _fail_if_over_budget(result, max_tokens, engine)
 
 
 # ---------------------------------------------------------------------------
-# [INTERNAL] Helpers
+# [内部实现] 辅助函数
 # ---------------------------------------------------------------------------
 
 
 def _total_tokens(messages: list[BaseMessage], engine: TokenCounter) -> int:
-    """Sum the token count of every message's content."""
+    """汇总所有消息内容的 Token 数。"""
     total = 0
     for msg in messages:
         content = msg.content if isinstance(msg.content, str) else ""
@@ -118,34 +113,34 @@ def _total_tokens(messages: list[BaseMessage], engine: TokenCounter) -> int:
 def _pop_tool_call_pair(
     messages: list[BaseMessage], idx: int
 ) -> tuple[BaseMessage, BaseMessage] | None:
-    """If the message at *idx* is part of a tool-call pair with its neighbour,
-    remove **both** and return them.  Otherwise return ``None``.
+    """如果 *idx* 处消息与相邻消息构成工具调用对，则**同时**删除并返回二者；
+    否则返回 ``None``。
 
-    Two cases are recognised:
+    可识别两种情况：
 
-    1. ``AIMessage(tool_calls=…)`` at *idx* followed by a ``ToolMessage``
-       with a matching ``tool_call_id`` at *idx+1*.
-    2. ``ToolMessage`` at *idx* preceded by an ``AIMessage(tool_calls=…)``
-       at *idx-1* with a matching ``tool_call_id``.
+    1. *idx* 处为 ``AIMessage(tool_calls=…)``，其后 *idx+1* 处为具有匹配
+       ``tool_call_id`` 的 ``ToolMessage``。
+    2. *idx* 处为 ``ToolMessage``，其前 *idx-1* 处为具有匹配
+       ``tool_call_id`` 的 ``AIMessage(tool_calls=…)``。
     """
     if idx >= len(messages):
         return None
 
     msg = messages[idx]
 
-    # Case 1 — AIMessage at idx, ToolMessage at idx+1
+    # 情况 1——idx 处是 AIMessage，idx+1 处是 ToolMessage
     if isinstance(msg, AIMessage) and msg.tool_calls:
         if idx + 1 < len(messages):
             next_msg = messages[idx + 1]
             if isinstance(next_msg, ToolMessage) and next_msg.tool_call_id in {
                 tc["id"] for tc in msg.tool_calls
             }:
-                # Remove both — order matters: higher index first
+            # 同时删除二者——顺序很重要，应先删除较大索引
                 del messages[idx + 1]
                 del messages[idx]
                 return (msg, next_msg)
 
-    # Case 2 — ToolMessage at idx, AIMessage at idx-1
+    # 情况 2——idx 处是 ToolMessage，idx-1 处是 AIMessage
     if isinstance(msg, ToolMessage) and idx > 0:
         prev_msg = messages[idx - 1]
         if (
@@ -163,7 +158,7 @@ def _pop_tool_call_pair(
 def _fail_if_over_budget(
     messages: list[BaseMessage], max_tokens: int, engine: TokenCounter
 ) -> list[BaseMessage]:
-    """Raise ``ContextBudgetExceededError`` if *messages* still exceed the budget."""
+    """*messages* 仍超过预算时抛出 ``ContextBudgetExceededError``。"""
     total = _total_tokens(messages, engine)
     if total > max_tokens:
         raise ContextBudgetExceededError(

@@ -1,4 +1,4 @@
-"""Cross-round R0/R1/R2 comparison report and dependency-free SVG charts."""
+"""跨轮 R0/R1/R2 对比报告与无第三方依赖的 SVG 图表。"""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ def write_comparison_report(
     output_dir: Path,
     run_dirs: dict[str, Path],
 ) -> Path:
-    """Create structured comparison data, Markdown and SVG charts."""
+    """创建结构化对比数据、Markdown 报告和 SVG 图表。"""
     ordered = {
         round_name: Path(run_dirs[round_name])
         for round_name in ROUND_ORDER

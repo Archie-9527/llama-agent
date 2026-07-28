@@ -1,10 +1,8 @@
-"""R1 tool-output virtualization at the central capability boundary.
+"""在统一能力边界实现 R1 工具输出虚拟化。
 
-Large raw results are persisted in :class:`ArtifactStore`; the model and
-LangGraph state receive only a compact descriptor, deterministic previews and
-an opaque artifact id.  No LLM call is used to produce the descriptor, so the
-optimization itself does not add inference latency or introduce hallucinated
-facts.
+大型原始结果持久化到 :class:`ArtifactStore`；模型与 LangGraph 状态只接收
+紧凑描述、确定性预览和不透明的 Artifact ID。描述信息的生成不调用 LLM，
+因此该优化本身不会增加推理延迟，也不会引入幻觉事实。
 """
 
 from __future__ import annotations
@@ -27,7 +25,7 @@ _config = MemoryConfig()
 
 
 def initialize_artifact_virtualizer(config: MemoryConfig) -> None:
-    """Install the process-local R1 policy after tool bootstrap."""
+    """在工具引导完成后安装进程级 R1 策略。"""
     config.validate()
     global _config
     with _lock:
@@ -35,7 +33,7 @@ def initialize_artifact_virtualizer(config: MemoryConfig) -> None:
 
 
 def maybe_virtualize_tool_result(tool_name: str, result: object) -> object:
-    """Return *result* unchanged unless the enabled R1 threshold is exceeded."""
+    """仅当启用 R1 且结果超过阈值时才进行虚拟化，否则原样返回 *result*。"""
     config = _config
     if not config.artifact_virtualization or tool_name in _ARTIFACT_ACCESS_TOOLS:
         return result
@@ -162,5 +160,5 @@ def _reset_artifact_virtualizer_for_testing() -> None:
 
 
 def artifact_virtualizer_config() -> dict[str, Any]:
-    """Expose an immutable diagnostic snapshot for tests and diagnostics."""
+    """为测试和诊断提供不可变的配置快照。"""
     return asdict(_config)

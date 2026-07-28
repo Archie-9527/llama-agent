@@ -1,4 +1,4 @@
-"""Typed telemetry configuration and snapshot models."""
+"""带类型的遥测配置与快照模型。"""
 
 from __future__ import annotations
 

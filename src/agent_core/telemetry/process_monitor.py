@@ -1,4 +1,4 @@
-"""Portable process-memory sampler with no mandatory third-party dependency."""
+"""无需强制第三方依赖的可移植进程内存采样器。"""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ def _from_stdlib() -> tuple[int | None, int | None, int | None]:
     rss: int | None = None
     try:
         raw = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        # macOS reports bytes; Linux and most BSD variants report KiB.
+        # macOS 返回字节，Linux 和大多数 BSD 变体返回 KiB。
         rss = int(raw if platform.system() == "Darwin" else raw * 1024)
     except (OSError, ValueError):
         pass

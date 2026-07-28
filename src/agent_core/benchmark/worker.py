@@ -1,4 +1,4 @@
-"""Fresh-process execution worker for one benchmark sample."""
+"""在全新进程中执行单个 Benchmark 样本的 Worker。"""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ from agent_core.telemetry import initialize_telemetry
 
 
 def _turn_result_payload(turn, result: dict) -> dict:
-    """Return the minimal per-turn diagnostic persisted by a benchmark run."""
+    """返回 Benchmark 运行需要持久化的最小逐轮诊断信息。"""
     return {
         "turn_index": turn.turn_index,
         "turn_id": turn.turn_id,
@@ -48,11 +48,10 @@ def _run_conversation_case(
     manager: ConversationManager,
     turns: tuple[str, ...],
 ) -> tuple[dict, list[dict], int | None]:
-    """Run turns in order and stop after the first failed turn.
+    """按顺序执行各轮，并在第一个失败轮次后停止。
 
-    Continuing after a failure creates misleading follow-up errors because the
-    prior assistant answer was never produced.  Remaining turns are retained as
-    explicit skipped records so the report still shows the full case shape.
+    失败后继续执行会产生误导性的后续错误，因为上一轮助手回答并未生成。其余
+    轮次会保留为明确的跳过记录，使报告仍能展示完整 Case 结构。
     """
     conversation_id, turn, result = manager.start(turns[0])
     turn_results = [_turn_result_payload(turn, result)]

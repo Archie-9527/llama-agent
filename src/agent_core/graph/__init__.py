@@ -1,10 +1,10 @@
-"""Graph orchestration layer — Plan → Execute → Reflect loop.
+"""图编排层——计划 → 执行 → 反思循环。
 
-Public API:
-    * ``AgentState`` — the canonical state TypedDict.
-    * ``build_graph`` — assemble and compile the outer StateGraph.
-    * ``get_checkpointer`` — create a SQLite-backed checkpointer.
-    * ``get_react_agent`` — return the cached inner ReAct subgraph.
+公共 API：
+    * ``AgentState``——规范的状态 TypedDict。
+    * ``build_graph``——组装并编译外层 StateGraph。
+    * ``get_checkpointer``——创建以 SQLite 为后端的 Checkpointer。
+    * ``get_react_agent``——返回缓存的内部 ReAct 子图。
 """
 
 from agent_core.graph.state import AgentState

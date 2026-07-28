@@ -1,11 +1,11 @@
-"""Capability layer — plugin-based capability provider architecture.
+"""能力层——基于插件的能力 Provider 架构。
 
-Public API:
-    * ``ToolsConfig`` — top-level configuration container.
-    * ``bootstrap_capabilities`` — the single entry point for wiring
-      config → providers → capability_registry.
-    * ``CapabilityProvider`` / ``register_provider`` — base class and
-      decorator for writing new providers.
+公共 API：
+    * ``ToolsConfig``——顶层配置容器。
+    * ``bootstrap_capabilities``——连接
+      配置 → Provider → capability_registry 的唯一入口。
+    * ``CapabilityProvider`` / ``register_provider``——编写新 Provider 时使用的
+      基类与装饰器。
 """
 
 from agent_core.capabilities.bootstrap import (

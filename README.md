@@ -1,50 +1,644 @@
-# Llama Agent Baseline
+# llama-agent
 
-基于 `llama-cpp-python`、LangChain 与 LangGraph 的本地工具智能体。当前版本包含
-阶段一功能基线：Plan–Execute–Reflect–Finalize、多轮 Conversation、
-checkpoint/resume、统一遥测和隔离进程 Benchmark；同时包含 R1 工具输出
-虚拟化与 R2 生命周期感知上下文管理，两项优化均可独立关闭做消融实验。
+`llama-agent` 是一个完全本地运行的工具型 Agent 系统。项目使用
+`llama-cpp-python` 加载 GGUF 模型，通过 LangChain 的 ChatModel/Tool 
+接口接入模型与工具，并用 LangGraph 实现可 checkpoint、可 resume 的
+Planner–Executor–Reflector–Finalizer 工作流。
 
-完整架构、两阶段建设方案和 Benchmark 用例说明见
-[`docs/整体系统设计说明书.md`](docs/整体系统设计说明书.md)。
+系统支持单任务执行、持久化多轮会话、本地工具调用、全屏交互式 CLI、
+运行遥测和可重复 Benchmark。在此基础上，项目实现了两项面向长生命周期
+Agent 的上下文优化：
 
-## CLI
+- **R1：工具输出虚拟化**——大型工具结果外置到 ArtifactStore，模型只接收摘要、首尾预览和按需读取句柄。
+- **R2：生命周期上下文管理**——根据上下文的重要性、时效性和访问阶段，选择、压缩或归档历史执行记录与会话轮次。
 
-```bash
-# 单个任务
-llama-agent run "使用 count_lines 统计 src/agent_core/llm_engine.py 的行数"
+> 当前 R1/R2 属于 Agent 应用层的上下文优化。它们能够减少输入 Token、
+> Prompt 预填充开销和逻辑 KV 占用，但没有修改 llama.cpp 的物理 KV Cache
+> 分配器。
 
-# 新建或续接外部多轮会话
-llama-agent continue "记住项目代号是 llama-agent"
-llama-agent continue "上一轮的项目代号是什么"
-llama-agent chat
-llama-agent cli
-llama-agent list-conversations
+## 目录
 
-# 恢复中断任务
-llama-agent resume [thread_id]
+- [1. 项目说明](#1-项目说明)
+- [2. R0、R1、R2 优化设计](#2-r0r1r2-优化设计)
+- [3. Benchmark 设计与测试结果](#3-benchmark-设计与测试结果)
+- [4. 安装、配置与使用](#4-安装配置与使用)
 
-# 查看合并后的配置
-llama-agent show-config
+## 1. 项目说明
+
+### 1.1 核心能力
+
+- 本地加载 Qwen 等 GGUF 模型，不依赖云端推理 API。
+- 使用 `llama-cpp-python` 执行模型推理，可配置 CPU、CUDA 或 Metal offload。
+- 通过 LangChain `BaseChatModel` 和 `BaseTool` 接入模型与工具生态。
+- 通过 LangGraph 编排 Planner、Executor、Reflector 和 Finalizer。
+- 使用 SQLite Checkpointer 保存 AgentState，支持任务中断恢复。
+- 使用 ConversationStore 保存多轮对话，可在后续轮次召回历史信息。
+- 支持文件、日志、只读 SQLite、受限 Shell、Artifact 和 Skill 工具。
+- 提供单次任务、持久化对话、普通交互和全屏 TUI 四种使用方式。
+- 采集推理、工具、生命周期、进程内存、GPU 显存和逻辑 KV 指标。
+- 在隔离子进程中执行 Benchmark，并自动生成 Markdown 报告和 SVG 图表。
+
+### 1.2 系统架构
+
+```mermaid
+flowchart TD
+    U["用户 / CLI"] --> S["会话与任务管理"]
+
+    S --> P["Planner<br/>任务规划"]
+    P --> E["Executor<br/>步骤执行"]
+    E --> T["工具调用"]
+    T --> E
+    E --> R["Reflector<br/>结果检查"]
+
+    R -->|"需要继续"| P
+    R -->|"任务完成"| F["Finalizer<br/>生成最终回答"]
+    F --> U
+
+    P --> L["Llama-cpp<br/>本地 GGUF 模型"]
+    E --> L
+    R --> L
+    F --> L
+
+    S <--> M["会话记忆与上下文管理"]
+    S <--> C["Checkpoint<br/>任务保存与恢复"]
 ```
 
-每个成功任务都通过 `AgentState.final_answer` 返回统一最终答案；失败任务通过
-`AgentState.error` 返回结构化错误。
+外层 LangGraph 负责一个任务的计划、执行、反思与最终回答；Executor 内部还有一个 ReAct 子图，用于完成“决定调用工具 → 执行真实工具 → 将工具结果重新送入模型 → 生成步骤结论”的闭环。
+Checkpoint 只保存外层节点边界状态，避免内外两层同时持久化造成恢复语义混乱。
 
-### 全屏交互式 CLI
+### 1.3 主要模块
 
-`llama-agent cli` 使用与 `chat` 相同的持久化 Conversation 后端，但提供全屏
-终端界面、运行阶段提示、工具执行卡片，以及 Token、KV、RSS/GPU 内存状态栏。
-模型和 LangGraph 仍使用稳定的同步调用；等待期间界面显示滚动省略号，任务
-完成后一次性展示原始 Thinking（可选）和最终回答。
+```text
+.
+├── agent_config.toml                 # 运行时配置
+├── pyproject.toml                    # Python包、依赖与 CLI 入口
+├── benchmark/
+│   ├── workloads/                    # R0/R1/R2 测试套件
+│   └── results/                      # 原始数据、报告与图表
+├── src/agent_core/
+│   ├── llm_engine.py                 # 本地 GGUF ChatModel
+│   ├── graph/                        # LangGraph 节点、路由与 Checkpoint
+│   ├── conversation/                 # 多轮会话管理与 SQLite 持久化
+│   ├── capabilities/                 # 工具 Provider 与 Capability 注册
+│   ├── artifacts/                    # R1 ArtifactStore 与虚拟化
+│   ├── memory/                       # R2 生命周期上下文管理
+│   ├── telemetry/                    # Token、KV、RSS、GPU 等遥测
+│   ├── benchmark/                    # Runner、Evaluator、聚合与报告
+│   ├── interactive/                  # 斜杠命令和交互会话
+│   ├── tui/                          # Textual 全屏终端界面
+│   └── templates/                    # 各 Agent 节点的 Jinja2 Prompt
+└── src/tests/                        # 单元测试与真实模型集成测试
+```
+
+### 1.4 当前工具
+
+| 分类 | 工具 | 作用 |
+|---|---|---|
+| Shell | `execute_shell_command`、`count_lines` | 执行白名单命令、统计代码行数 |
+| 文件 | `get_file_metadata`、`read_file`、`search_file` | 查看元数据、分段读取、检索文本 |
+| 日志 | `aggregate_log_errors`、`search_log`、`get_log_window` | 错误聚合、关键词检索、上下文窗口 |
+| SQLite | `describe_sqlite_table`、`query_sqlite` | 查看表结构、执行只读查询 |
+| Artifact | `get_artifact_summary`、`retrieve_artifact`、`search_artifact` | 查看、分段读取或搜索外置结果 |
+| Skill | 配置目录中的 Skill | 将本地技能注册为 Agent Capability |
+
+Shell 工具采用命令白名单和强制超时；
+SQLite 工具只允许读取；
+文件、日志、SQLite 和 Artifact 工具均受到路径或任务所有权隔离。
+
+## 2. R0、R1、R2 优化设计
+
+三轮消融采用递进关系：
+
+| Round | Artifact 虚拟化 | 生命周期上下文 | 用途 |
+|:---:|:---:|:---:|---|
+| R0 | 关闭 | 关闭 | 功能基线 |
+| R1 | 开启 | 关闭 | 验证大型工具输出外置 |
+| R2 | 开启 | 开启 | 在 R1 上验证执行状态压缩和长会话召回 |
+
+### 2.1 R0：无上下文优化的功能基线
+
+R0 关闭所有 `[memory]` 优化开关，工具原始结果和基线会话历史直接进入模型
+上下文。用于验证 Agent 功能是否完整，并作为 R1/R2 的对照组。
+
+完成一次任务的主要流程如下：
+
+1. **Planner** 根据用户目标生成可执行步骤；普通问题也可以生成无工具回答步骤。
+2. **Executor** 执行当前步骤。需要外部证据时，内部 ReAct 子图生成结构化
+`tool_calls`，真实调用 Capability，并将 `ToolMessage` 重新送回模型。
+3. **Reflector** 检查计划和真实执行记录，决定任务完成、失败或重新规划。
+4. **Finalizer** 根据用户目标、计划和执行证据生成统一 `final_answer`。
+5. LangGraph Checkpointer 在节点边界保存状态；进程中断后可以按照 `thread_id`
+   继续执行。
+
+### 2.2 R1：工具输出虚拟化
+
+#### 问题
+
+调用日志、文件或数据库工具可能一次返回几十数百 KiB的数据，若每轮对话都把完整
+结果写入 ToolMessage、LangGraph State 和后续 Prompt，会同时造成：
+
+- 输入 Token 与 Prefill 时间增加；
+- 逻辑 KV Cache 随上下文增长；
+- 模型注意力被大量低价值中间数据占用；
+- 长结果可能直接超过 `n_ctx`。
+
+#### 设计原理
+
+对模型暴露一个小型逻辑视图，对于工具结果仅保留摘要和部分预览送入模型，原始数据则放在可寻址的外部存储中。模型只有在摘要和预览不足时，才按需搜索或读取原文。
+
+工具结果大小在小于artifact_inline_max_bytes时，将原结果送入模型；当结果大于artifact_inline_max_bytes是，原文写入AtifactStore，只将摘要、头部预览、尾部预览和可用操作送入模型，模型根据需要调用工具查询原文。
+
+```text
+工具原始结果
+    │
+    ├── 大小 <= artifact_inline_max_bytes ──> 原样进入模型
+    │
+    └── 大小 > artifact_inline_max_bytes
+          ├── 原文写入 ArtifactStore
+          ├── 生成 SHA-256 与 artifact
+          └── 模型只接收摘要、头部预览、尾部预览和可用操作
+```
+
+当前摘要是**确定性摘要**，不会额外调用模型。它包含工具名、原始字节数、
+行数和结构化结果中的小型标量字段；`content`、`stdout`、`rows`、`matches`
+等字段不会复制到摘要。预览在固定字符预算内平均保留头部和尾部，适合
+证据分别位于文件开头或结尾的场景。
+
+ArtifactStore 采用混合存储：
+
+- `data/artifacts/artifacts.sqlite` 保存 Artifact 元数据；
+- `data/artifacts/content/<id>.bin` 保存原始内容；
+- `artifact://<opaque-id>` 作为不暴露文件路径的任务级句柄；
+- `owner_id` 防止一个任务读取另一个任务的 Artifact。
+
+模型可通过以下工具恢复必要证据：
+
+- `get_artifact_summary`：读取元数据和摘要；
+- `search_artifact`：在完整 Artifact 中检索关键词并返回有限上下文；
+- `retrieve_artifact`：按 `offset + length` 分段读取原文。
+
+这项优化不依赖特定模型或推理引擎，也不增加摘要推理调用。它的主要代价是
+磁盘写入、SQLite 元数据和按需检索调用，因此阈值过低会对小结果产生负优化。
+
+### 2.3 R2：生命周期上下文管理
+
+#### 问题
+
+R1 只处理单个“大结果”。在长任务中，许多低于阈值的中型结果仍会累计进入prompt；
+在长会话中，prompt会保留最近 N 轮对话，造成prompt冗余或过长。R2 优化处理这种
+情况。
+
+#### 生命周期模型
+
+| 生命周期 | 含义 | 默认处理 |
+|---|---|---|
+| `PINNED` | 当前目标、明确要求记住的事实、有效计划 | 优先保留 |
+| `HOT` | 最近工具记录和最近会话轮次 | 保留原文 |
+| `WARM` | 较旧但仍可能访问的上下文 | 摘要留在状态，原文外置 |
+| `COLD` | 已完成阶段或低频历史 | 归档到 ContextStore |
+| `DEAD` | 已失效或结束的上下文 | 不再注入活动 Prompt |
+
+当前实现包含两条互补路径。
+
+#### 路径一：执行状态压缩
+
+当 `execution_log` 的累计 Token 超过压力阈值后，R2：
+
+1. 保护最近的 HOT 记录；
+2. 对较旧记录生成确定性、证据感知摘要；
+3. 只有原文大小和预计压缩率均达到 ROI 阈值时才执行压缩；
+4. 将原文按任务隔离写入 `ContextStore`；
+5. 在 LangGraph State 中保留摘要、`memory://` 引用和生命周期；
+6. 同步减少后续 Prompt 与 SQLite Checkpoint 中的重复文本。
+
+`ContextStore` 位于 `memory.context_store_path`，使用 SQLite 表
+`context_entries` 保存归档内容、内容哈希、Token 数、生命周期、来源和
+Artifact 引用。Benchmark 会为每个样本重定向到独立目录。
+
+#### 路径二：长会话上下文选择
+
+当完整历史超过激活阈值，或当前问题需要召回最近窗口之外的明确记忆时，R2
+不再简单拼接最近 N 轮，而是构建预算内的上下文投影：
+
+1. 提取“记住、修正、更正、不再有效”等显式记忆；
+2. 对项目代号、校验码、部署环境、服务、端口和 request_id 等结构化事实采用
+   “后写覆盖前写”；
+3. 保留最近 `hot_conversation_turns` 轮；
+4. 根据当前问题与历史文本的词项重合度召回 Top-K 相关旧轮次；
+5. 在 `context_retrieval_token_budget` 内生成最终会话上下文；
+6. 完整原始会话仍保存在 `conversations.sqlite`，不重复写入 ContextStore。
+
+该实现是一种确定性、可评测的生命周期策略，不等同于通用语义记忆。当前
+结构化事实抽取覆盖有限字段；需要支持任意知识时，可在后续接入 Embedding
+检索、可学习重要度或模型摘要。
+
+#### 自适应与防负优化
+
+R2 不会对每个任务强制压缩：
+
+- 短对话低于 `context_activation_tokens` 时沿用 R1 行为；
+- 工具记录只有在累计 Token 达到压力阈值后才考虑归档；
+- 单条记录小于 `context_min_compaction_bytes` 时跳过；
+- 压缩收益低于 `context_min_compaction_ratio` 时跳过；
+- ContextStore 在第一次有效归档时才创建；
+- Reflector 和 Finalizer 不重复注入同一份生命周期摘要。
+
+
+### 2.4 开关与主要参数
+
+`agent_config.toml` 默认关闭优化，确保普通 R0 测试不会被污染：
+
+```toml
+[memory]
+# R1
+artifact_virtualization = false
+artifact_inline_max_bytes = 8192
+artifact_preview_chars = 1200
+artifact_summary_chars = 600
+
+# R2
+lifecycle_context = false
+context_store_path = "data/context_memory.sqlite"
+context_budget_tokens = 12000
+context_activation_tokens = 2048
+context_trigger_ratio = 0.75
+context_min_compaction_bytes = 2048
+context_min_compaction_ratio = 0.30
+hot_execution_records = 4
+hot_conversation_turns = 4
+summary_trigger_tokens = 6000
+summary_target_chars = 800
+context_retrieval_top_k = 3
+context_retrieval_token_budget = 2000
+checkpoint_compaction = true
+```
+
+也可以用环境变量临时覆盖：
+
+```bash
+# R1
+export AGENT_MEMORY_ARTIFACT_VIRTUALIZATION=true
+export AGENT_MEMORY_LIFECYCLE_CONTEXT=false
+
+# R2（R2 必须同时启用 R1）
+export AGENT_MEMORY_ARTIFACT_VIRTUALIZATION=true
+export AGENT_MEMORY_LIFECYCLE_CONTEXT=true
+```
+
+## 3. Benchmark 设计与测试结果
+
+### 3.1 实验方法
+
+Benchmark 采用以下方法减少不可控因素：
+
+- Fixture 全部在本地确定性生成，不依赖网络。
+- 每个样本在新的 Python 子进程中加载模型，隔离 llama.cpp 分配器、KV 状态、
+  Checkpoint、ConversationStore、ArtifactStore 和 ContextStore。
+- 同一 Suite 的 R0/R1/R2 使用相同模型文件、模型 SHA-256、采样种子、
+  Fixture、任务和评价规则。
+- `suite.seed + repetition` 作为每次重复的模型随机种子。
+- Warmup 样本单独执行，但不计入正式汇总。
+- 自动保存原始 JSONL/CSV、失败详情、聚合结果、Markdown 报告与 SVG 图表。
+
+单个运行目录包含：
+
+```text
+manifest.json
+task_results.jsonl
+inference_events.jsonl
+tool_events.jsonl
+lifecycle_events.jsonl
+system_memory.csv
+kv_metrics.csv
+summary.json
+failures.jsonl
+report.md
+```
+
+### 3.2 用例设计
+
+| Suite | 用例 | 主要验证目标 |
+|---|---|---|
+| `r0_smoke.json` | 小规模文件、工具和会话任务 | 安装与主链路冒烟 |
+| `r0_full.json` | W1～W8，共 9 个 Case | 文件、日志、SQLite、大输出、多工具、恢复和多轮记忆 |
+| `r1_artifact_virtualization.json` | 16 KiB、64 KiB、256 KiB | R1 预览与按需 Artifact 检索 |
+| `r2_context_pressure.json` | 6 × 6000 B 工具结果 | 单结果低于 R1 阈值、累计上下文触发 R2 |
+| `r2_lifecycle_context.json` | 16/32 轮召回、多阶段证据、Artifact 回归 | R2 会话召回和 R1 兼容性 |
+
+`r0_full.json` 的 W1～W8：
+
+- **W1 文件检查**：先读取元数据，再读取文件内容。
+- **W2 SQLite 调查**：查看表结构，再执行只读查询。
+- **W3 日志分析**：错误聚合、关键词搜索、上下文窗口三步链路。
+- **W4 大文件**：分别读取 16 KiB 和 64 KiB，并识别尾部证据。
+- **W5 多工具故障调查**：联合日志、SQLite 和配置文件形成证据链。
+- **W6 失败恢复**：先验证写操作被拒绝，再执行只读查询。
+- **W7 八轮记忆**：验证事实保存、端口更新和综合召回。
+- **W8 工具证据跨轮使用**：后续轮次不得重复调用工具。
+
+### 3.3 当前 R0～R2 对比结果
+
+以下数据来自仓库中保留的三次自动消融测试。三次测试使用相同模型文件。
+以下结果的实验平台为：
+> CPU: 12 vCPU Intel(R) Xeon(R) Platinum 8352V CPU @ 2.10GHz
+> GPU: NVIDIA vGPU-32GB
+> 内存: 90G
+> 镜像: PyTorch  2.8.0 CUDA 12.8 
+
+
+#### 实验 A：通用功能与 R1 大输出优化
+
+数据源：
+包含 9 个 Case、1 次 Warmup、5 次正式重复，共 45 个正式样本/轮。
+
+| 指标 | R0 | R1 | R2 |
+|---|---:|---:|---:|
+| 任务成功率 | 97.78% | 97.78% | 97.78% |
+| 平均端到端耗时 | 28.81 s | 27.51 s | 28.18 s |
+| P95 端到端耗时 | 39.90 s | 42.63 s | 39.33 s |
+| 累计输入 Token | 437,509 | 316,819 | 317,757 |
+| 峰值逻辑 KV Token | 19,353 | 1,867 | 1,889 |
+| 峰值 GPU 进程显存 | 12,768 MiB | 12,232 MiB | 12,232 MiB |
+| Checkpoint 总量 | 10.31 MiB | 8.00 MiB | 8.10 MiB |
+
+![通用套件累计输入 Token](benchmark/graph/r0_full/input_tokens.svg)
+
+![通用套件峰值逻辑 KV](benchmark/graph/r0_full/peak_kv.svg)
+
+R1 相对 R0：
+
+- 成功率保持不变；
+- 输入 Token 减少 **27.59%**；
+- 峰值逻辑 KV Token 减少 **90.35%**；
+- GPU 进程显存峰值减少 **4.20%**；
+- Checkpoint 总量减少 **22.42%**；
+- 平均端到端耗时减少 **4.51%**。
+
+R1 共虚拟化 10 个大型结果，外置原文 418,490 B，减少模型内联
+400,155 B，工具结果压缩率为 95.62%。收益主要来自 16/64 KiB 两个 W4 Case；
+其中 64 KiB Case 的输入 Token/样本从 21,572 降至 3,960，平均耗时从
+30.93 s 降至 15.74 s。
+
+#### 实验 B：R2 累计执行上下文压力
+本轮测试连续读取 6 个 6000 B 文件
+
+| 指标 | R0 | R1 | R2 |
+|---|---:|---:|---:|
+| 任务成功率 | 100.00% | 100.00% | 100.00% |
+| 平均端到端耗时 | 82.60 s | 77.19 s | 71.46 s |
+| P95 端到端耗时 | 84.53 s | 80.34 s | 73.15 s |
+| 累计输入 Token | 174,647 | 174,654 | 161,202 |
+| 峰值逻辑 KV Token | 9,686 | 9,686 | 7,999 |
+| 峰值 GPU 进程显存 | 12,472 MiB | 12,472 MiB | 12,424 MiB |
+| Checkpoint 总量 | 1.80 MiB | 1.80 MiB | 1.17 MiB |
+
+![执行上下文压力下的平均耗时](benchmark/graph/r2_context_pressure/latency_mean.svg)
+
+![执行上下文压力下的 Checkpoint](benchmark/graph/r2_context_pressure/checkpoint.svg)
+
+R2 相对 R1：
+
+- 成功率保持 100%；
+- 输入 Token 减少 **7.70%**；
+- 峰值逻辑 KV Token 减少 **17.42%**；
+- Checkpoint 总量减少 **35.06%**；
+- 平均端到端耗时减少 **7.43%**。
+
+#### 实验 C：R2 长会话生命周期
+
+数据源：
+本轮测试包含 16 轮召回、32 轮召回、多阶段本地证据和 Artifact 中部证据回归，
+每轮共 20 个正式样本。
+
+| 指标 | R0 | R1 | R2 |
+|---|---:|---:|---:|
+| 任务成功率 | 25.00% | 50.00% | 100.00% |
+| 平均端到端耗时 | 99.14 s | 91.46 s | 74.80 s |
+| P95 端到端耗时 | 189.50 s | 192.10 s | 140.94 s |
+| 累计输入 Token | 635,905 | 467,285 | 419,456 |
+| 峰值逻辑 KV Token | 19,566 | 2,474 | 2,425 |
+| 峰值 GPU 进程显存 | 12,784 MiB | 12,248 MiB | 12,248 MiB |
+| Checkpoint 总量 | 38.04 MiB | 19.07 MiB | 19.08 MiB |
+
+![长会话套件成功率](benchmark/graph/r2_lifecycle_context/success_rate.svg)
+
+![长会话套件累计输入 Token](benchmark/graph/r2_lifecycle_context/success_rate.svg)
+
+R0/R1 的会话基线只保留最近 8 轮，无法在 16/32 轮后看到最早的
+  `AgentMem/7319`，两类召回 Case 均为 0/5，因此R0，R1执行成功率低于R2。
+
+R2 相对 R1 的输入 Token 减少 **10.24%**，平均端到端耗时减少 **18.21%**。
+生命周期遥测显示会话上下文投影压缩率为 41.50%，额外召回 450 个历史轮次
+记录，最终选择 1,050 个轮次记录，共注入 49,130 Token。
+
+#### 结果结论
+
+1. **R1 已在大工具输出场景形成稳定收益**：成功率不下降，同时明显减少输入
+   Token、逻辑 KV、Checkpoint 和 64 KiB Case 延迟。
+2. **R2 必须在达到上下文压力或历史超出最近窗口时评估**：短任务不触发是
+   自适应策略的预期行为。
+3. **R2 执行状态压缩有效**：长对话任务中 Token、逻辑 KV、Checkpoint 和延迟
+   均下降。
+
+### 3.4 执行 Benchmark
+
+运行单轮：
+
+```bash
+llama-agent --config agent_config.toml benchmark \
+  --suite benchmark/workloads/r0_full.json \
+  --output-root benchmark/results \
+  --round R0/R1/R2
+```
+
+只执行指定 Case，`--case` 可以重复：
+
+```bash
+llama-agent --config agent_config.toml benchmark \
+  --suite benchmark/workloads/r0_full.json \
+  --output-root benchmark/results \
+  --round R0-regression \
+  --case w4-large-file-16k \
+  --case w4-large-file-64k
+```
+
+也可以使用脚本：
+
+```bash
+python src/agent_core/benchmark/run_r0_r2_ablation.py \
+  --config agent_config.toml \
+  --suite benchmark/workloads/r0_full.json \
+  --output-root benchmark/results
+```
+
+## 4. 安装、配置与使用
+
+### 4.1 环境要求
+
+- Python 3.11 或更高版本；
+- C/C++ 编译器、CMake；
+- 一个 GGUF 格式的权重文件；
+- 使用 NVIDIA GPU 时，需要可用的驱动、CUDA Toolkit 和 `nvcc`；
+
+### 4.2 CPU 安装
+
+最简单的 CPU 安装：
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -e .
+```
+CPU 配置中设置：
+```toml
+[engine]
+n_gpu_layers = 0
+```
+
+### 4.3 NVIDIA CUDA 安装
+
+先确认驱动和编译器：
+
+```bash
+nvidia-smi
+nvcc --version
+```
+
+
+建议在全新虚拟环境中先构建 CUDA 版 `llama-cpp-python`，再安装项目：
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip setuptools wheel
+
+CMAKE_ARGS="-DGGML_CUDA=ON" \
+FORCE_CMAKE=1 \
+CUDACXX=/usr/local/cuda/bin/nvcc \
+python -m pip install --no-cache-dir \
+  llama-cpp-python==0.3.19
+
+python -m pip install -e ".[gpu]"
+```
+
+
+输出应为 `True`。然后配置：
+
+```toml
+[engine]
+n_gpu_layers = -1
+```
+
+Apple Silicon 可将构建参数替换为：
+
+```bash
+CMAKE_ARGS="-DGGML_METAL=ON" FORCE_CMAKE=1 \
+python -m pip install --no-cache-dir --force-reinstall \
+  llama-cpp-python==0.3.19
+```
+
+### 4.4 `pyproject.toml` 与运行配置
+
+`pyproject.toml` 负责 Python 包元数据、依赖和命令入口。
+
+开发环境可安装：
+
+```bash
+python -m pip install -e ".[dev]"
+```
+
+模型与运行时参数配置在 `agent_config.toml`：
+
+```toml
+[agent]
+max_iterations = 6
+db_path = "data/checkpoints.sqlite"
+conversation_db_path = "data/conversations.sqlite"
+conversation_history_turns = 8
+conversation_history_token_budget = 4096
+
+[engine]
+model_path = "/root/models/model.gguf"
+n_ctx = 20000
+n_gpu_layers = -1       # CPU 使用 0
+n_batch = 512
+n_threads = 8
+chat_format = "chatml-function-calling"
+temperature = 0.2
+max_tokens = 512
+disable_thinking = true
+```
+
+### 4.5 单次任务与工具调用
+
+普通对话：
+
+```bash
+llama-agent --config agent_config.toml run "你好"
+```
+
+显式要求 Agent 调用工具：
+
+```bash
+llama-agent --config agent_config.toml run \
+  "使用 count_lines 统计 src/agent_core/llm_engine.py 的行数"
+
+llama-agent --config agent_config.toml run \
+  "先用 get_file_metadata 查看 README.md，再用 read_file 读取前 2000 个字符并总结"
+```
+
+任务被中断后恢复：
+
+```bash
+llama-agent --config agent_config.toml resume <thread_id>
+
+# 省略 thread_id 时恢复最近任务
+llama-agent --config agent_config.toml resume
+```
+
+### 4.6 持久化多轮会话
+
+每次执行 `continue` 会复用最近的 `conversation_id`：
+
+```bash
+llama-agent --config agent_config.toml continue \
+  "记住项目代号是 AgentMem，部署环境是 linux"
+
+llama-agent --config agent_config.toml continue \
+  "上一轮的项目代号和部署环境是什么？"
+```
+
+也可以指定会话：
+
+```bash
+llama-agent --config agent_config.toml continue \
+  --conversation-id <conversation_id> \
+  "继续分析上一轮结果"
+
+llama-agent --config agent_config.toml list-conversations
+```
+
+### 4.7 交互式终端
+
+普通 stdin 交互：
+
+```bash
+llama-agent --config agent_config.toml chat
+```
+
+全屏 TUI：
 
 ```bash
 llama-agent --config agent_config.toml cli
-llama-agent --config agent_config.toml cli --conversation-id <id>
 llama-agent --config agent_config.toml cli --show-thinking
+llama-agent --config agent_config.toml cli --conversation-id <conversation_id>
 ```
 
-常用交互命令：
+等待模型时界面显示动态省略号；任务完成后一次性显示回答。右侧状态区展示
+会话、模型配置、Token、逻辑 KV、RSS 和 GPU 显存等信息。
+
+常用斜杠命令：
 
 ```text
 /help
@@ -64,277 +658,32 @@ llama-agent --config agent_config.toml cli --show-thinking
 /clear
 ```
 
-`/tool`、`/skill` 和 `/<capability>` 不会绕过 Agent 直接执行本地代码，而是
-把本轮约束为指定能力，继续经过 Tool Schema、LangGraph、Artifact 虚拟化与
-Telemetry。以 `//` 开头可以向模型发送普通的 `/` 文本。
-
-`tui.show_thinking` 只控制展示；只有 `engine.disable_thinking = false` 时，
-Qwen 等模型通常才会实际生成 Thinking。TUI 日志默认写入
-`data/llama-agent-tui.log`，避免日志破坏全屏布局。
-
-Qwen3/Qwen3.5 默认可能生成 `<think>` 推理块。配置中的
-`engine.disable_thinking = true` 会发送 `/no_think` 软开关，同时引擎会把仍然
-返回的推理块保存在消息元数据中而不作为 CLI 答案打印。单步骤任务直接复用
-Executor 已验证的自然语言结论，不再额外调用一次 Finalizer 模型。
-
-## R0 Benchmark
-
-```bash
-llama-agent --config agent_config.toml benchmark \
-  --suite benchmark/workloads/r0_smoke.json \
-  --output-root benchmark/results \
-  --round R0
-```
-
-快速连通性检查使用 `r0_smoke.json`；正式第一轮使用
-`benchmark/workloads/r0_full.json`，覆盖本地文件、结构化日志、只读 SQLite、
-16/64 KiB 工具输出、多工具证据链、失败恢复、八轮会话和工具证据跨轮引用。
-网络 Provider 已移除，所有 fixture 均由 worker 在样本目录内确定性生成。
-
-只回归一个用例时使用 `--case`：
-
-```bash
-llama-agent --config agent_config.toml benchmark \
-  --suite benchmark/workloads/r0_full.json \
-  --output-root benchmark/results \
-  --round R0-regression \
-  --case w2-sqlite-investigation
-```
-
-`--case` 可以重复使用，以 Suite 文件中的顺序执行多个用例：
-
-```bash
-llama-agent --config agent_config.toml benchmark \
-  --suite benchmark/workloads/r0_full.json \
-  --output-root benchmark/results \
-  --round R0-regression \
-  --case w2-sqlite-investigation \
-  --case w5-multi-tool-incident \
-  --case w6-readonly-recovery
-```
-
-快速复测上一轮全部失败类别时，可以使用只执行一次、不含 warmup 的
-`benchmark/workloads/r0_failed_regression.json`：
-
-```bash
-llama-agent --config agent_config.toml benchmark \
-  --suite benchmark/workloads/r0_failed_regression.json \
-  --output-root benchmark/results \
-  --round R0-regression
-```
-
-每个 warmup/测量样本在新的 Python 进程中加载模型并执行，避免 llama.cpp
-分配器、KV 状态或上一个任务污染后续样本。输出目录包含：
+例如：
 
 ```text
-manifest.json
-task_results.jsonl
-inference_events.jsonl
-tool_events.jsonl
-lifecycle_events.jsonl
-system_memory.csv
-kv_metrics.csv
-summary.json
-failures.jsonl
-report.md
-cases/
+/count_lines 统计 src/agent_core/llm_engine.py 的行数
+/tool search_log 在 benchmark.log 中搜索 ERROR
 ```
 
-`R0` 会拒绝任何已启用的 `[memory]` 优化开关，以确保基线没有混入后续优化。
+这些命令只约束本轮必须使用指定 Capability。
 
-## R1 工具输出虚拟化
+`tui.show_thinking` 或 `--show-thinking` 只控制是否展示模型返回的原始思考内容；
+只有 `engine.disable_thinking = false` 时，支持 Thinking 的模型才通常会生成
+该内容。
 
-R1 在统一工具执行边界检查结果大小。超过
-`memory.artifact_inline_max_bytes` 的原始结果写入任务隔离的 ArtifactStore，
-模型上下文只保留确定性摘要、首尾预览、内容哈希和 `artifact://` 引用；需要
-更多证据时可调用 `search_artifact` 或 `retrieve_artifact` 按需读取。
+### 4.8 测试
 
-默认配置保持 `artifact_virtualization = false`，因此可继续执行 R0。R1 可通过
-环境变量临时开启，无需修改基线配置文件：
+运行单元测试：
 
 ```bash
-AGENT_MEMORY_ARTIFACT_VIRTUALIZATION=true \
-llama-agent --config agent_config.toml benchmark \
-  --suite benchmark/workloads/r1_artifact_virtualization.json \
-  --output-root benchmark/results \
-  --round R1
+python -m pytest src/tests
 ```
 
-只回归按需检索链路：
+只运行 R1/R2 相关测试：
 
 ```bash
-AGENT_MEMORY_ARTIFACT_VIRTUALIZATION=true \
-llama-agent --config agent_config.toml benchmark \
-  --suite benchmark/workloads/r1_artifact_virtualization.json \
-  --output-root benchmark/results \
-  --round R1-regression \
-  --case r1-artifact-on-demand-search
-```
-
-阈值、首尾预览和摘要长度也可分别通过
-`AGENT_MEMORY_ARTIFACT_INLINE_MAX_BYTES`、
-`AGENT_MEMORY_ARTIFACT_PREVIEW_CHARS`、
-`AGENT_MEMORY_ARTIFACT_SUMMARY_CHARS` 覆盖。报告会额外给出外置字节、模型
-内联字节、减少量、压缩率和 Artifact 磁盘成本。
-
-若要做严格的 R0/R1 同用例对照，应保持 R0 的 workload 不变，只打开 R1
-开关。例如可对 `r0_full.json` 中的 16/64 KiB 两个样本使用重复的 `--case`
-运行，并将 `--round` 设为 `R1-ablation`；这样任务、fixture、模型和评价规则均
-与 R0 一致。上面的 R1 专用 Suite 主要用于验证虚拟化描述和按需检索能力。
-
-```bash
-# R0：全部内存优化关闭
-AGENT_MEMORY_ARTIFACT_VIRTUALIZATION=false \
-AGENT_MEMORY_LIFECYCLE_CONTEXT=false \
-AGENT_MEMORY_KV_LIFECYCLE=false \
-AGENT_MEMORY_BRANCH_MANAGEMENT=false \
-llama-agent --config agent_config.toml benchmark \
-  --suite benchmark/workloads/r0_full.json \
-  --output-root benchmark/results \
-  --round R0-artifact-ablation \
-  --case w4-large-file-16k \
-  --case w4-large-file-64k
-
-# R1：只打开工具输出虚拟化，其余条件完全相同
-AGENT_MEMORY_ARTIFACT_VIRTUALIZATION=true \
-AGENT_MEMORY_LIFECYCLE_CONTEXT=false \
-AGENT_MEMORY_KV_LIFECYCLE=false \
-AGENT_MEMORY_BRANCH_MANAGEMENT=false \
-llama-agent --config agent_config.toml benchmark \
-  --suite benchmark/workloads/r0_full.json \
-  --output-root benchmark/results \
-  --round R1-artifact-ablation \
-  --case w4-large-file-16k \
-  --case w4-large-file-64k
-```
-
-## R2 生命周期感知上下文管理
-
-R2 在 R1 之上将上下文分为 PINNED、HOT、WARM、COLD 和 DEAD。当前目标、
-明确记忆和当前计划受到保护；最近执行记录保留原文；较旧执行结果使用确定性
-摘要替换并将原文归档到任务隔离的 `ContextStore`。多轮 Conversation 开启 R2
-后不再把全部历史拼入 `task_goal`，而是选择最近轮、明确要求记住的轮次和与
-当前问题相关的历史。R2 采用自适应策略：短对话直接沿用 R1；工具记录只有在
-累计 token 达到压力阈值，且单条记录同时满足最小字节数和最小压缩收益时才
-归档；`ContextStore` 在第一次有效归档时才创建。Reflector 和 Finalizer 不再
-重复注入同一份生命周期摘要。
-
-运行 R1/R2 同用例消融：
-
-```bash
-# R1：只启用 Artifact 虚拟化
-AGENT_MEMORY_ARTIFACT_VIRTUALIZATION=true \
-AGENT_MEMORY_LIFECYCLE_CONTEXT=false \
-AGENT_MEMORY_KV_LIFECYCLE=false \
-AGENT_MEMORY_BRANCH_MANAGEMENT=false \
-llama-agent --config agent_config.toml benchmark \
-  --suite benchmark/workloads/r2_lifecycle_context.json \
-  --output-root benchmark/results \
-  --round R1-lifecycle-ablation
-
-# R2：在相同工作负载上增加生命周期上下文管理
-AGENT_MEMORY_ARTIFACT_VIRTUALIZATION=true \
-AGENT_MEMORY_LIFECYCLE_CONTEXT=true \
-AGENT_MEMORY_KV_LIFECYCLE=false \
-AGENT_MEMORY_BRANCH_MANAGEMENT=false \
-llama-agent --config agent_config.toml benchmark \
-  --suite benchmark/workloads/r2_lifecycle_context.json \
-  --output-root benchmark/results \
-  --round R2-lifecycle-context
-```
-
-R2 报告增加上下文投影前后 token、状态压缩字节、Conversation 召回次数和
-ContextStore 磁盘占用。`R2` round 会拒绝未同时开启 R1 与 R2 的配置。
-
-专项验证“多条中等工具结果累计造成上下文压力”：
-
-```bash
-llama-agent --config agent_config.toml ablation \
-  --suite benchmark/workloads/r2_context_pressure.json \
-  --output-root benchmark/results
-```
-
-这个 Case 连续读取 6 个 6000 字节文件。每次结果都低于默认 R1 的 8192 字节
-虚拟化阈值，因此 R1 不会介入；累计结果超过 R2 压力阈值后，R2 才会压缩较旧
-记录。正式报告应同时检查成功率、输入 Token、逻辑 KV、端到端延迟、
-`context_compaction_bytes_saved` 与 `total_persistent_storage_bytes`。
-
-## 一键运行 R0–R2 消融实验
-
-`ablation` 命令会对同一个 Suite、同一组 `--case`、同一模型和同一推理参数
-依次执行三轮。三轮内存策略由程序固定，不读取外部
-`AGENT_MEMORY_*` 开关作为实验分组：
-
-- R0：关闭 Artifact 虚拟化和生命周期上下文；
-- R1：仅开启 Artifact 虚拟化；
-- R2：开启 Artifact 虚拟化和生命周期上下文；
-- 三轮均关闭 `kv_lifecycle` 和 `branch_management`，当前不执行 R3。
-
-建议先执行能够覆盖 R1/R2 主要链路的五个代表用例：
-
-```bash
-llama-agent --config agent_config.toml ablation \
-  --suite benchmark/workloads/r0_full.json \
-  --output-root benchmark/results \
-  --case w4-large-file-16k \
-  --case w4-large-file-64k \
-  --case w5-multi-tool-incident \
-  --case w7-eight-turn-memory \
-  --case w8-tool-to-conversation-memory
-```
-
-上面的命令沿用 Suite 中的 `warmup_runs=1`、`measured_runs=5`，用于正式统计。
-只想先确认代码链路时可追加
-`--warmup-runs 0 --measured-runs 1`，速度约为正式五次测量版本的五分之一；
-快速结果不能替代最终统计报告。
-
-完整 Suite 去掉全部 `--case` 即可：
-
-```bash
-llama-agent --config agent_config.toml ablation \
-  --suite benchmark/workloads/r0_full.json \
-  --output-root benchmark/results
-```
-
-为减弱连续运行时的温度/频率偏差，可在多次完整实验间轮换顺序，例如分别使用
-`--round-order R0,R1,R2`、`--round-order R1,R2,R0` 和
-`--round-order R2,R0,R1`。每个样本还会记录实际 llama.cpp seed，Manifest
-保存源码树 SHA-256；不同源码指纹会在跨轮报告中触发警告。
-
-也可以直接执行：
-
-```bash
-.llm-env/bin/python scripts/run_r0_r2_ablation.py \
-  --config agent_config.toml \
-  --suite benchmark/workloads/r0_full.json \
-  --output-root benchmark/results
-```
-
-自动化目录下会保留三轮各自完整的原始结果，并额外生成
-`comparison_data.json`、`report.md` 和 `charts/*.svg`。报告包含总体与分 Case
-成功率、端到端延迟、输入 Token、逻辑 KV、RSS/GPU 显存、Checkpoint、
-R1 外置收益、R2 上下文压缩与召回指标，以及失败检查项。若模型、推理参数、
-用例集合或成功率不满足严格可比条件，报告会明确给出警告。
-
-## 遥测口径
-
-- `logical_tokens`、`position_span_tokens`：KV 逻辑占用，不是显存字节。
-- `state_size_bytes`：序列化状态大小，不等同于 KV Cache 物理内存。
-- RSS/USS/VMS：整个进程内存，包括模型权重与计算缓冲区。
-- NVIDIA 指标：安装 `.[gpu]` 后通过 NVML 采集进程和设备显存。
-- llama.cpp 性能计数器分别记录 prompt eval 与 decode eval；非流式 Agent
-  调用不伪造 TTFT，原始事件中的 `ttft_ms` 为 `null`。
-
-普通 CLI 默认关闭遥测；Benchmark worker 会强制开启并将数据写入对应样本目录。
-
-## 测试
-
-```bash
-pytest -q
-```
-
-不需要真实 GGUF 的阶段一回归测试：
-
-```bash
-pytest -q src/tests/test_stage1_baseline.py
+python -m pytest \
+  src/tests/test_r1_artifact_virtualization.py \
+  src/tests/test_r2_lifecycle_context.py \
+  src/tests/test_benchmark_ablation.py
 ```

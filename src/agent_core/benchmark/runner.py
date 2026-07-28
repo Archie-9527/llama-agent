@@ -1,7 +1,7 @@
-"""Parent-process benchmark orchestrator.
+"""Benchmark 父进程编排器。
 
-Every repetition runs in a fresh Python process so llama.cpp allocator state
-cannot leak into the next measured sample.
+每次重复都在全新的 Python 进程中运行，避免 llama.cpp 分配器状态泄漏到下一个
+测量样本。
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ def _filter_suite_cases(
     suite: BenchmarkSuite,
     case_ids: tuple[str, ...],
 ) -> BenchmarkSuite:
-    """Return a suite containing only requested IDs, in suite-file order."""
+    """按 Suite 文件顺序返回只包含指定 ID 的 Suite。"""
     if not case_ids:
         return suite
 
@@ -319,7 +319,7 @@ def _sha256(path: Path) -> str:
 
 
 def _source_tree_sha256(project_root: Path) -> str:
-    """Fingerprint executable sources independent of Git cleanliness."""
+    """为可执行源码生成不受 Git 工作区整洁状态影响的指纹。"""
     digest = hashlib.sha256()
     roots = (
         project_root / "src" / "agent_core",
@@ -370,9 +370,9 @@ def _worker_environment(
     )
     for key, value in (engine_overrides or {}).items():
         environment[f"AGENT_{key.upper()}"] = str(value)
-    # Freeze the parent process's resolved memory policy into every fresh
-    # worker.  Workers must not observe a config file edited halfway through a
-    # long benchmark, and manifest.json must describe what they actually ran.
+    # 将父进程解析后的内存策略固化到每个新 Worker。Worker 不能读到长时间
+    # Benchmark 执行到一半时被修改的配置文件；manifest.json 必须描述其实际
+    # 执行的配置。
     for key, value in (memory_config or {}).items():
         rendered = str(value).lower() if isinstance(value, bool) else str(value)
         environment[f"AGENT_MEMORY_{key.upper()}"] = rendered
@@ -411,7 +411,7 @@ def _git_value(command: list[str]) -> str:
 
 
 def _consolidate_telemetry(run_dir: Path) -> None:
-    """Create the documented run-level raw files from isolated samples."""
+    """根据隔离样本创建文档约定的运行级原始文件。"""
     jsonl_names = (
         "inference_events.jsonl",
         "tool_events.jsonl",
@@ -460,7 +460,7 @@ def _consolidate_telemetry(run_dir: Path) -> None:
 
 
 def _prepare_case(case, sample_dir: Path) -> dict[str, Any]:
-    """Materialize deterministic local fixtures requested by workload metadata."""
+    """根据工作负载元数据生成所需的确定性本地 Fixture。"""
     raw = case.to_dict()
     sample_dir.mkdir(parents=True, exist_ok=True)
     fixtures_dir = sample_dir / "fixtures"
@@ -594,7 +594,7 @@ def _write_payload_fixture(
     marker: str,
     marker_position: str = "end",
 ) -> None:
-    """Create deterministic filler with one marker at end or middle."""
+    """创建确定性填充内容，并在结尾或中部放置一个标记。"""
     if marker_position not in {"end", "middle"}:
         raise ValueError("fixture_marker_position must be 'end' or 'middle'")
     critical = (

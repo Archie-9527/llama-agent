@@ -1,4 +1,4 @@
-"""Task-isolated, file-backed storage for large tool outputs."""
+"""按任务隔离、以文件为后端的大型工具输出存储。"""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ class ArtifactMetadata:
 
 
 class ArtifactStore:
-    """Store content outside Agent messages and enforce owner isolation."""
+    """在 Agent 消息之外保存内容，并强制执行所有者隔离。"""
 
     def __init__(self, root: Path) -> None:
         self.root = root.resolve()

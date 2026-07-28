@@ -1,4 +1,4 @@
-"""Finalizer node — produce the stable user-facing task result."""
+"""Finalizer 节点——生成稳定、面向用户的任务结果。"""
 
 from __future__ import annotations
 
@@ -15,9 +15,8 @@ if TYPE_CHECKING:
 
 def finalizer_node(state: "AgentState") -> "AgentState":
     summaries = _usable_step_summaries(state)
-    # Executor already performs a tool-free summary call.  For a single-step
-    # task that conclusion is the complete answer, so another LLM call only
-    # adds latency and may expose/repeat model reasoning.
+    # Executor 已执行不带工具的总结调用。对于单步骤任务，该结论就是完整答案，
+    # 再调用一次 LLM 只会增加延迟，并可能暴露或重复模型推理。
     if len(state.get("plan_steps", [])) <= 1 and summaries:
         state["final_answer"] = summaries[-1]
         state["status"] = "done"

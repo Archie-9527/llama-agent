@@ -1,8 +1,7 @@
-"""Version-tolerant diagnostics for llama-cpp-python KV state.
+"""兼容不同版本的 llama-cpp-python KV 状态诊断。
 
-The values returned here intentionally distinguish logical token occupancy,
-position range and serialized state size.  None of them is labelled as
-physical KV bytes.
+此处返回值会明确区分逻辑 Token 占用、位置范围与序列化状态大小，任何一个
+指标都不会被标记为物理 KV 字节数。
 """
 
 from __future__ import annotations

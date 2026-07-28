@@ -1,4 +1,4 @@
-"""Aggregate raw benchmark results without hiding failures."""
+"""聚合原始 Benchmark 结果，不隐藏失败。"""
 
 from __future__ import annotations
 
@@ -14,8 +14,8 @@ def _distribution(values: list[float]) -> dict[str, float | None]:
     if not values:
         return {"mean": None, "median": None, "p95": None, "stdev": None}
     ordered = sorted(values)
-    # Nearest-rank percentile: for five samples P95 is the maximum, rather
-    # than the second-largest value produced by truncating 0.95 * n.
+    # 使用最邻近秩百分位：对于五个样本，P95 是最大值，而不是将 0.95 * n 截断
+    # 后得到的第二大值。
     p95_index = min(len(ordered) - 1, max(0, math.ceil(0.95 * len(ordered)) - 1))
     return {
         "mean": statistics.fmean(values),
@@ -264,7 +264,7 @@ def _measured_storage_bytes(
     pattern: str,
     measured_keys: set[tuple[str, str]],
 ) -> int:
-    """Sum files belonging to measured samples, excluding warmup storage."""
+    """汇总正式测量样本的文件大小，不包含 Warmup 存储。"""
     total = 0
     cases_root = run_dir / "cases"
     for path in run_dir.glob(pattern):

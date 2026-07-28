@@ -1,18 +1,17 @@
-"""Skills capability provider — data-driven, user-editable tools.
+"""Skill 能力 Provider——数据驱动、用户可编辑的工具。
 
-Scans a directory of YAML files, each defining a "skill" — a
-higher-level, business-oriented tool that non-developers can create
-and edit without touching Python code.
+扫描目录中的 YAML 文件，每个文件定义一个“Skill”，即更高层、面向业务的
+工具。非开发人员无需修改 Python 代码即可创建和编辑这些工具。
 
-Supported kinds:
-    * ``shell_template`` — a pre-built shell command with named
-      parameter slots (e.g. ``pdftotext {file_path} -``).
+支持的类型：
+    * ``shell_template``——带命名参数槽的预构建 Shell 命令，例如
+      ``pdftotext {file_path} -``。
 
-Design:
-    * Each ``kind`` maps to a builder function in ``_KIND_BUILDERS``.
-    * A single malformed YAML file is logged and skipped; the rest load.
-    * ``build()`` returns ``Capability`` instances — the conversion to
-      Pydantic args schema happens later, in ``react_agent_factory.py``.
+设计：
+    * 每个 ``kind`` 都映射到 ``_KIND_BUILDERS`` 中的一个构建函数。
+    * 单个格式错误的 YAML 文件会被记录并跳过，其余文件继续加载。
+    * ``build()`` 返回 ``Capability`` 实例；Pydantic 参数 Schema 的转换稍后
+      在 ``react_agent_factory.py`` 中完成。
 """
 
 from __future__ import annotations
@@ -43,14 +42,14 @@ class SkillsToolConfig:
     default_timeout_seconds: float = 15.0
 
 # ---------------------------------------------------------------------------
-# Kind builders — one function per ``kind`` value
+# 类型构建器——每个 ``kind`` 值对应一个函数
 # ---------------------------------------------------------------------------
 
 
 def _build_shell_template_handler(
     definition: dict[str, Any], config: SkillsToolConfig
 ) -> Callable[..., str]:
-    """Construct a callable for ``kind: shell_template`` skills."""
+    """为 ``kind: shell_template`` 的 Skill 构造可调用对象。"""
     template: str = definition["command_template"]
 
     def _runner(**kwargs: Any) -> str:
@@ -112,14 +111,15 @@ _KIND_BUILDERS: dict[str, Callable] = {
 
 
 # ---------------------------------------------------------------------------
-# YAML file loader
+# YAML 文件加载器
 # ---------------------------------------------------------------------------
 
 
 def _load_skill_file(path: Path, config: SkillsToolConfig) -> Capability:
-    """Parse one YAML skill file into a ``Capability``.
+    """将一个 YAML Skill 文件解析为 ``Capability``。
 
-    Raises ``ToolProviderConfigError`` on parse / schema error."""
+    解析或 Schema 出错时抛出 ``ToolProviderConfigError``。
+    """
     with open(path, encoding="utf-8") as f:
         definition = yaml.safe_load(f)
 
@@ -138,7 +138,7 @@ def _load_skill_file(path: Path, config: SkillsToolConfig) -> Capability:
 
     handler = _KIND_BUILDERS[kind](definition, config)
 
-    # Build JSON Schema from args definition
+    # 根据参数定义构建 JSON Schema
     args_def: dict[str, Any] = definition.get("args", {})
     properties: dict[str, dict] = {
         name: {
@@ -164,16 +164,16 @@ def _load_skill_file(path: Path, config: SkillsToolConfig) -> Capability:
 
 
 # ---------------------------------------------------------------------------
-# Provider
+# Provider 实现
 # ---------------------------------------------------------------------------
 
 
 @register_provider
 class SkillsCapabilityProvider(CapabilityProvider):
-    """Data-driven skills.  TOML section: ``[tools.providers.skills]``.
+    """数据驱动的 Skill。对应 TOML 段：``[tools.providers.skills]``。
 
-    Scans ``skills_dir`` for ``*.yaml`` files and converts each into
-    a ``Capability`` instance.
+    扫描 ``skills_dir`` 中的 ``*.yaml`` 文件，并将每个文件转换为一个
+    ``Capability`` 实例。
     """
 
     category = "skills"

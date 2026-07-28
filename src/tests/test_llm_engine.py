@@ -1,14 +1,14 @@
-"""Tests for llm_engine.py — covers section 1.8 acceptance criteria.
+"""测试 llm_engine.py，覆盖第 1.8 节验收标准。
 
-Acceptance criteria covered:
-  1. Model loading — valid path loads; invalid/missing → ModelLoadError + path in message
-  2. LangChain protocol — .invoke() returns AIMessage; .stream() content matches .invoke() at temperature=0
-  3. Token counting — get_num_tokens() matches llama.cpp native tokenizer exactly
-  4. Grammar constraint — grammar parameter yields parseable JSON output
-  5. Concurrency — 10 threads sharing one instance, no crashes, results are coherent
-  6. Timeout — InferenceTimeoutError raised, lock released, no deadlock
-  7. Tool-call format — bind_tools + tool-triggering input → structured AIMessage.tool_calls
-  8. Exception isolation — malformed grammar → AgentEngineError subclass, not raw llama_cpp error
+覆盖的验收标准：
+  1. 模型加载：有效路径可加载；无效或缺失时抛出包含路径的 ModelLoadError。
+  2. LangChain 协议：invoke 返回 AIMessage；temperature=0 时 stream 内容与 invoke 一致。
+  3. Token 计数：get_num_tokens() 与 llama.cpp 原生分词器完全一致。
+  4. 语法约束：grammar 参数产生可解析的 JSON 输出。
+  5. 并发：10 个线程共享一个实例时不崩溃，且结果一致。
+  6. 超时：抛出 InferenceTimeoutError、释放锁且不死锁。
+  7. 工具调用格式：bind_tools 与工具触发输入产生结构化 AIMessage.tool_calls。
+  8. 异常隔离：错误语法抛出 AgentEngineError 子类，而非原始 llama_cpp 异常。
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Ensure the src directory is importable
+# 确保 src 目录可被导入。
 _src = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _src not in sys.path:
     sys.path.insert(0, _src)
@@ -49,7 +49,7 @@ from langchain_core.messages import (
 )
 from langchain_core.messages.tool import ToolCall
 
-# ── helpers ────────────────────────────────────────────────────────────────
+# ── 辅助函数 ─────────────────────────────────────────────────────────────────
 
 MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
 MODEL_FILENAME = "Qwen3.5-4B-UD-Q8_K_XL.gguf"
@@ -75,11 +75,11 @@ _real_model_pytest_mark = pytest.mark.skipif(
 )
 
 
-# ── Singleton isolation fixture ─────────────────────────────────────────────
+# ── 单例隔离夹具 ─────────────────────────────────────────────────────────────
 
 @pytest.fixture(autouse=True)
 def _reset_engine_singleton():
-    """Reset the global singleton between tests so state does not leak."""
+    """在测试之间重置全局单例，避免状态泄漏。"""
     import agent_core.llm_engine as engine_mod
 
     engine_mod._engine_instance = None
@@ -88,31 +88,31 @@ def _reset_engine_singleton():
 
 
 # ============================================================================
-# 1. Model loading (1.8.1)
+# 1. 模型加载（1.8.1）
 # ============================================================================
 
 class TestModelLoading:
-    """Acceptance: valid GGUF path loads OK; missing/corrupt → ModelLoadError."""
+    """验收：有效 GGUF 可加载，缺失或损坏时抛出 ModelLoadError。"""
 
     @_real_model_pytest_mark
     def test_load_valid_model_succeeds(self):
-        """Valid GGUF file loads without error and produces a usable instance."""
+        """有效 GGUF 文件应正常加载并产生可用实例。"""
         model = ChatLlamaCpp(model_path=MODEL_PATH, n_ctx=256, verbose=False)
         assert model._client is not None
         assert model._llm_type == "llama-cpp-agent"
 
     def test_missing_model_raises_model_load_error(self):
-        """Non-existent file → ModelLoadError with path in the message."""
+        """文件不存在时抛出 ModelLoadError，消息中包含路径。"""
         with pytest.raises(ModelLoadError, match="nonexistent-model.gguf"):
             ChatLlamaCpp(model_path="nonexistent-model.gguf")
 
     def test_empty_model_path_raises_model_load_error(self):
-        """Empty string path → ModelLoadError (fail-fast, not silent)."""
+        """空字符串路径应快速抛出 ModelLoadError，而非静默失败。"""
         with pytest.raises(ModelLoadError):
             ChatLlamaCpp(model_path="")
 
     def test_error_message_contains_file_path(self):
-        """Error message must include the file path for debugging."""
+        """错误消息必须包含文件路径，以便调试。"""
         bad_path = "/tmp/definitely_not_a_real_model_42.gguf"
         with pytest.raises(ModelLoadError) as exc_info:
             ChatLlamaCpp(model_path=bad_path)
@@ -120,15 +120,15 @@ class TestModelLoading:
 
 
 # ============================================================================
-# 2. LangChain protocol compatibility (1.8.2)
+# 2. LangChain 协议兼容性（1.8.2）
 # ============================================================================
 
 class TestLangChainProtocol:
-    """Acceptance: .invoke() → AIMessage; .stream() chunks match .invoke() output."""
+    """验收：invoke 返回 AIMessage，stream 分块拼接后与 invoke 输出一致。"""
 
     @_real_model_pytest_mark
     def test_invoke_returns_aimessage(self):
-        """ChatLlamaCpp.invoke([HumanMessage]) must return an AIMessage."""
+        """ChatLlamaCpp.invoke([HumanMessage]) 必须返回 AIMessage。"""
         model = ChatLlamaCpp(
             model_path=MODEL_PATH, n_ctx=256, temperature=0.0, max_tokens=64,
         )
@@ -139,7 +139,7 @@ class TestLangChainProtocol:
 
     @_real_model_pytest_mark
     def test_stream_chunks_reassemble_to_invoke_output(self):
-        """At temperature=0, all streamed chunks joined must equal invoke result."""
+        """temperature=0 时，所有流式分块拼接结果必须等于 invoke 结果。"""
         model = ChatLlamaCpp(
             model_path=MODEL_PATH, n_ctx=256, temperature=0.0, max_tokens=64,
         )
@@ -158,7 +158,7 @@ class TestLangChainProtocol:
 
     @_real_model_pytest_mark
     def test_invoke_with_system_message(self):
-        """Verify SystemMessage is handled correctly in the pipeline."""
+        """验证流水线能正确处理 SystemMessage。"""
         model = ChatLlamaCpp(
             model_path=MODEL_PATH, n_ctx=256, temperature=0.0, max_tokens=32,
         )
@@ -171,15 +171,15 @@ class TestLangChainProtocol:
 
 
 # ============================================================================
-# 3. Token counting (1.8.3)
+# 3. Token 计数（1.8.3）
 # ============================================================================
 
 class TestTokenCounting:
-    """Acceptance: get_num_tokens() uses the native tokenizer (exact count)."""
+    """验收：get_num_tokens() 使用原生分词器精确计数。"""
 
     @_real_model_pytest_mark
     def test_get_num_tokens_matches_native_tokenizer(self):
-        """get_num_tokens(text) must equal len(llama.tokenize(text.encode()))."""
+        """get_num_tokens(text) 必须等于原生 tokenize 结果的长度。"""
         model = ChatLlamaCpp(model_path=MODEL_PATH, n_ctx=256)
         text = "Hello world, this is a test sentence."
         native_count = len(model._client.tokenize(text.encode("utf-8")))
@@ -190,31 +190,31 @@ class TestTokenCounting:
 
     @_real_model_pytest_mark
     def test_get_num_tokens_empty_string(self):
-        """Empty string should tokenize to 0."""
+        """空字符串的 Token 数应为 0。"""
         model = ChatLlamaCpp(model_path=MODEL_PATH, n_ctx=256)
         assert model.get_num_tokens("") == 0
 
     @_real_model_pytest_mark
     def test_get_num_tokens_longer_text(self):
-        """Token count scales sensibly with longer text (not a char/4 heuristic)."""
+        """较长文本的 Token 数应合理增长，而非使用字符数除以 4 的估算。"""
         model = ChatLlamaCpp(model_path=MODEL_PATH, n_ctx=256)
         short = model.get_num_tokens("a")
         long_text = model.get_num_tokens("a" * 100)
-        # For most tokenizers, repeated "a" tokens vary — just verify non-zero
+        # 多数分词器对重复字母的切分不同，这里只验证结果非零。
         assert short > 0
         assert long_text > 0
 
 
 # ============================================================================
-# 4. Grammar constraint enforcement (1.8.4)
+# 4. 语法约束执行（1.8.4）
 # ============================================================================
 
 class TestGrammarConstraint:
-    """Acceptance: with grammar parameter, output is parseable by json.loads."""
+    """验收：传入 grammar 参数后，输出可由 json.loads 解析。"""
 
     @_real_model_pytest_mark
     def test_json_grammar_produces_parseable_json(self):
-        """Invoke with a simple JSON Schema grammar → output must be valid JSON."""
+        """使用简单 JSON Schema 语法调用时，输出必须是有效 JSON。"""
         from agent_core.grammar_builder import build_json_grammar
 
         schema = {
@@ -239,7 +239,7 @@ class TestGrammarConstraint:
 
     @_real_model_pytest_mark
     def test_enum_grammar_constrains_exact_output(self):
-        """Enum grammar restricts output to one of the listed options."""
+        """枚举语法将输出限制为所列选项之一。"""
         from agent_core.grammar_builder import build_enum_grammar
 
         grammar = build_enum_grammar(["red", "green", "blue"])
@@ -250,8 +250,7 @@ class TestGrammarConstraint:
             [HumanMessage(content="Say only one word: red")],
             grammar=grammar,
         )
-        # With enum grammar, output should be one of the enum values (possibly
-        # with surrounding quotes depending on model behavior)
+        # 使用枚举语法时，输出应为某个枚举值；根据模型行为，外层可能带引号。
         content = result.content.strip().strip('"')
         assert content in {"red", "green", "blue"}, (
             f"Expected one of red/green/blue, got {content!r}"
@@ -259,15 +258,15 @@ class TestGrammarConstraint:
 
 
 # ============================================================================
-# 5. Concurrency safety (1.8.5)
+# 5. 并发安全（1.8.5）
 # ============================================================================
 
 class TestConcurrency:
-    """Acceptance: 10 threads sharing one instance — no crashes, coherent results."""
+    """验收：10 个线程共享一个实例时不崩溃，且结果一致。"""
 
     @_real_model_pytest_mark
     def test_ten_threads_no_crashes(self):
-        """10 concurrent invocations against one model instance — no crashes."""
+        """对同一模型实例进行 10 次并发调用时不应崩溃。"""
         model = ChatLlamaCpp(
             model_path=MODEL_PATH, n_ctx=512, temperature=0.7, max_tokens=32,
         )
@@ -292,16 +291,16 @@ class TestConcurrency:
 
 
 # ============================================================================
-# 6. Timeout handling (1.8.6)
+# 6. 超时处理（1.8.6）
 # ============================================================================
 
 class TestTimeout:
-    """Acceptance: short request_timeout on long generation → InferenceTimeoutError,
-    lock released so subsequent requests are not blocked."""
+    """验收：长生成任务遇到较短 request_timeout 时抛出 InferenceTimeoutError，
+    同时释放锁，后续请求不被阻塞。"""
 
     @_real_model_pytest_mark
     def test_lock_released_after_timeout(self):
-        """After a timeout, a subsequent call must succeed (lock not held)."""
+        """超时后，后续调用必须成功，证明锁未被占用。"""
         model = ChatLlamaCpp(
             model_path=MODEL_PATH,
             n_ctx=256,
@@ -309,38 +308,38 @@ class TestTimeout:
             max_tokens=4096,
             request_timeout=0.001,
         )
-        # First call times out
+        # 第一次调用超时。
         try:
             model.invoke([HumanMessage(content="Write many paragraphs about history")])
         except InferenceTimeoutError:
             pass
 
-        # Second call MUST succeed — if lock leaked, this would hang
+        # 第二次调用必须成功；若锁泄漏，此处会挂起。
         try:
             result = model.invoke([HumanMessage(content="Say: hi")])
             assert isinstance(result, AIMessage)
         except InferenceTimeoutError:
-            # This is acceptable if the model is really slow — the key is no hang
+        # 模型确实很慢时允许再次超时，关键是不能挂起。
             pass
 
 
 # ============================================================================
-# 7. Tool-call format (1.8.7)
+# 7. 工具调用格式（1.8.7）
 # ============================================================================
 
 class TestToolCallFormat:
-    """Acceptance: bind_tools → AIMessage.tool_calls is structured correctly."""
+    """验收：bind_tools 后 AIMessage.tool_calls 具有正确结构。"""
 
     def test_bind_tools_defaults_to_auto_tool_choice(self):
-        """Ordinary create_agent binding must enable llama.cpp auto tools."""
+        """普通 create_agent 绑定必须启用 llama.cpp 自动工具选择。"""
         from langchain_core.tools import tool
 
         @tool
         def echo(value: str) -> str:
-            """Echo a value."""
+            """回显一个值。"""
             return value
 
-        # Avoid loading a GGUF for this binding-only contract test.
+        # 该测试只验证绑定契约，因此避免加载 GGUF。
         model = ChatLlamaCpp.model_construct(model_path="unused.gguf")
         bound = model.bind_tools([echo])
 
@@ -349,19 +348,19 @@ class TestToolCallFormat:
 
     @_real_model_pytest_mark
     def test_bind_tools_populates_tool_calls(self):
-        """After bind_tools, the response AIMessage.tool_calls is structured."""
+        """bind_tools 后，响应中的 AIMessage.tool_calls 应为结构化数据。"""
         from langchain_core.tools import tool
 
         @tool
         def get_weather(city: str) -> str:
-            """Get current weather for a city."""
+            """获取指定城市的当前天气。"""
             return f"Weather in {city}: sunny"
 
         model = ChatLlamaCpp(
             model_path=MODEL_PATH, n_ctx=512, temperature=0.0, max_tokens=128,
         )
         bound = model.bind_tools([get_weather])
-        # Tool-calling models recognize "what is the weather" as a tool trigger
+        # 工具调用模型会将天气查询识别为工具触发条件。
         result = bound.invoke([HumanMessage(content="What is the weather in Paris?")])
 
         assert isinstance(result, AIMessage)
@@ -376,18 +375,18 @@ class TestToolCallFormat:
 
 
 # ============================================================================
-# 8. Exception isolation (1.8.8)
+# 8. 异常隔离（1.8.8）
 # ============================================================================
 
 class TestExceptionIsolation:
-    """Acceptance: malformed input → AgentEngineError subclass, never raw llama_cpp error."""
+    """验收：错误输入只抛出 AgentEngineError 子类，不泄漏原始 llama_cpp 异常。"""
 
     @_real_model_pytest_mark
     def test_malformed_grammar_raises_agent_engine_error(self):
-        """A garbage grammar string must not produce a raw llama_cpp exception."""
+        """无效语法字符串不得产生原始 llama_cpp 异常。"""
         model = ChatLlamaCpp(model_path=MODEL_PATH, n_ctx=256)
 
-        # We mock the internal client to avoid needing a real model for this.
+        # 模拟内部客户端，避免该测试依赖真实模型。
         mock_client = MagicMock()
         mock_client.create_chat_completion.side_effect = ValueError(
             "llama.cpp internal: invalid grammar"
@@ -399,16 +398,16 @@ class TestExceptionIsolation:
                 [HumanMessage(content="test")],
                 grammar="this is not a valid grammar %%^^&&",
             )
-        # The exception must be an AgentEngineError subclass, NOT raw ValueError
+        # 异常必须是 AgentEngineError 子类，而非原始 ValueError。
         assert not isinstance(exc_info.value, ValueError)
 
 
 # ============================================================================
-# 9. Message format conversion (unit tests)
+# 9. 消息格式转换（单元测试）
 # ============================================================================
 
 class TestMessageConversion:
-    """Verify the internal message-conversion helpers."""
+    """验证内部消息转换辅助函数。"""
 
     def test_convert_system_message(self):
         msgs = [SystemMessage(content="You are helpful.")]
@@ -492,21 +491,21 @@ class TestMessageConversion:
 
 
 # ============================================================================
-# 10. Singleton get_engine() (1.8.1)
+# 10. 单例 get_engine()（1.8.1）
 # ============================================================================
 
 class TestGetEngine:
-    """Verify the global singleton entry point."""
+    """验证全局单例入口。"""
 
     @_real_model_pytest_mark
     def test_get_engine_returns_same_instance(self):
-        """Repeated get_engine() calls return the identical object."""
+        """重复调用 get_engine() 应返回同一对象。"""
         e1 = initialize_engine(EngineConfig(model_path=MODEL_PATH, n_ctx=256))
         e2 = get_engine()
         assert e1 is e2
 
     def test_compile_json_schema_to_gbnf_returns_string(self):
-        """Bridge function produces a non-empty GBNF string."""
+        """桥接函数应生成非空 GBNF 字符串。"""
         result = compile_json_schema_to_gbnf({
             "type": "object",
             "properties": {"x": {"type": "integer"}},

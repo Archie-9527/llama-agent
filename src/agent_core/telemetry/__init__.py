@@ -1,4 +1,4 @@
-"""Non-invasive telemetry used by the agent and benchmark runner."""
+"""供 Agent 和 Benchmark Runner 使用的非侵入式遥测。"""
 
 from agent_core.telemetry.collector import (
     current_phase,

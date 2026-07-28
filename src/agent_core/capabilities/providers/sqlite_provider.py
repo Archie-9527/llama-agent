@@ -1,4 +1,4 @@
-"""Read-only SQLite inspection and query capabilities."""
+"""只读 SQLite 检查与查询能力。"""
 
 from __future__ import annotations
 

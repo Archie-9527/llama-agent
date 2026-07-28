@@ -1,6 +1,5 @@
-"""Runtime services shared by interactive front-ends.
+"""交互式前端共享的运行时服务。
 
-Submodules are intentionally not imported here: the model and graph publish
-events during their own imports, and eager re-exports would create a circular
-dependency through ``ConversationManager``.
+此处有意不导入子模块：模型和图会在各自导入期间发布事件，过早重新导出会通过
+``ConversationManager`` 形成循环依赖。
 """

@@ -1,15 +1,14 @@
-"""Tests for grammar_builder.py — covers section 2.5 acceptance criteria.
+"""测试 grammar_builder.py，覆盖第 2.5 节验收标准。
 
-Acceptance criteria covered:
-  1. JSON Schema round-trip — build_json_grammar returns parseable GBNF; model
-     output constrained by that grammar validates against the original schema
-  2. Enum constraint strictness — build_enum_grammar output is byte-exact one
-     of the options
-  3. Tool-call schema correctness — build_tool_call_grammar output has correct
-     "tool" field and arguments pass input_schema validation
-  4. Unsupported $ref rejection — explicit GrammarCompileError with field path
-  5. Cache effectiveness — same schema (reordered keys) triggers 1 real compile
-  6. Architecture isolation — no ``import llama_cpp`` in grammar_builder.py
+覆盖的验收标准：
+  1. JSON Schema 往返验证：build_json_grammar 返回可解析的 GBNF，受其约束的
+     模型输出可通过原始 Schema 校验。
+  2. 枚举约束严格性：build_enum_grammar 的输出在字节层面精确匹配某个选项。
+  3. 工具调用 Schema 正确性：build_tool_call_grammar 输出正确的 ``tool`` 字段，
+     且参数通过 input_schema 校验。
+  4. 拒绝不支持的 $ref：抛出包含字段路径的明确 GrammarCompileError。
+  5. 缓存有效性：同一 Schema（键顺序不同）只触发一次实际编译。
+  6. 架构隔离：grammar_builder.py 中不出现 ``import llama_cpp``。
 """
 
 from __future__ import annotations
@@ -23,7 +22,7 @@ from unittest.mock import patch
 
 import pytest
 
-# Ensure the src directory is importable
+# 确保 src 目录可被导入。
 _src = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _src not in sys.path:
     sys.path.insert(0, _src)
@@ -37,20 +36,19 @@ from agent_core.grammar_builder import (
     build_tool_call_grammar,
 )
 from llama_cpp import LlamaGrammar
-# ── Real model (for round-trip tests) ───────────────────────────────────────
+# ── 真实模型（用于往返测试）─────────────────────────────────────────────────
 #
-# These tests need BOTH:
-#  1. A real GGUF file on disk, and
-#  2. A real llama-cpp-python package (not the conftest mock).
-# When running in the CI sandbox where llama-cpp-python cannot be compiled,
-# the conftest installs a synthetic mock — in that case we skip real-model
-# tests even if a GGUF file happens to be present.
+# 这些测试同时需要：
+#  1. 磁盘上的真实 GGUF 文件；
+#  2. 真实的 llama-cpp-python 包（不能是 conftest 提供的模拟对象）。
+# 在无法编译 llama-cpp-python 的 CI 沙箱中，conftest 会安装合成模拟对象；
+# 此时即使存在 GGUF 文件，也跳过真实模型测试。
 
 MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
 MODEL_FILENAME = "Qwen3.5-4B-UD-Q8_K_XL.gguf"
 MODEL_PATH = os.path.join(MODEL_DIR, MODEL_FILENAME)
 
-# Import the mock flag set by conftest at collection time.
+# 导入 conftest 在测试收集阶段设置的模拟标志。
 _gguf_exists = os.path.isfile(MODEL_PATH)
 try:
     from conftest import _is_mock_llama_cpp as _mock  # type: ignore[import-not-found]
@@ -70,22 +68,22 @@ _real_model_pytest_mark = pytest.mark.skipif(
     ),
 )
 
-# ── Singleton isolation ─────────────────────────────────────────────────────
+# ── 单例隔离 ─────────────────────────────────────────────────────────────────
 
 @pytest.fixture(autouse=True)
 def _clear_lru_cache():
-    """Clear the LRU cache between tests so count-based assertions are reliable."""
+    """在测试之间清空 LRU 缓存，确保计数断言可靠。"""
     _cached_compile.cache_clear()
     yield
     _cached_compile.cache_clear()
 
 
 # ============================================================================
-# 1. JSON Schema round-trip (2.5.1)
+# 1. JSON Schema 往返验证（2.5.1）
 # ============================================================================
 
 class TestJsonSchemaRoundTrip:
-    """Acceptance: valid schema → GBNF; constrained output parseable + validates."""
+    """验收：有效 Schema 转换为 GBNF，约束输出可解析且能通过校验。"""
 
     SIMPLE_OBJECT_SCHEMA = {
         "type": "object",
@@ -115,7 +113,7 @@ class TestJsonSchemaRoundTrip:
 
     @_real_model_pytest_mark
     def test_json_round_trip_with_real_model(self):
-        """End-to-end: grammar → model output → parsed → validated."""
+        """端到端验证：语法→模型输出→解析→校验。"""
         from agent_core.llm_engine import ChatLlamaCpp
 
         schema = {
@@ -152,7 +150,7 @@ class TestJsonSchemaRoundTrip:
 
     @_real_model_pytest_mark
     def test_schema_with_nested_objects(self):
-        """Nested schema → model produces valid nested JSON."""
+        """嵌套 Schema 应使模型生成有效的嵌套 JSON。"""
         from agent_core.llm_engine import ChatLlamaCpp
 
         schema = {
@@ -189,18 +187,18 @@ class TestJsonSchemaRoundTrip:
 
 
 # ============================================================================
-# 2. Enum constraint strictness (2.5.2)
+# 2. 枚举约束严格性（2.5.2）
 # ============================================================================
 
 class TestEnumGrammar:
-    """Acceptance: build_enum_grammar output must be byte-exact one of the options."""
+    """验收：build_enum_grammar 输出必须在字节层面精确匹配某个选项。"""
 
     def test_basic_enum_output(self):
         result = build_enum_grammar(["continue", "done", "failed"])
         result = result._grammar
         assert isinstance(result, str)
         assert result.startswith("root ::=")
-        # Each option should appear somewhere in the grammar
+        # 每个选项都应出现在语法中。
         for opt in ["continue", "done", "failed"]:
             assert opt in result
 
@@ -215,15 +213,15 @@ class TestEnumGrammar:
             build_enum_grammar([])
 
     def test_special_characters_escaped(self):
-        """Options containing GBNF-special chars (backslash, quote) must be escaped."""
+        """包含 GBNF 特殊字符（反斜杠、引号）的选项必须转义。"""
         result = build_enum_grammar(['hello\\world'])
         result = result._grammar
-        # The backslash in hello\world must be escaped to \\\\ in GBNF
+        # hello\world 中的反斜杠在 GBNF 中必须转义为 \\\\。
         assert "\\\\" in result
 
     @_real_model_pytest_mark
     def test_enum_model_output_exact_match(self):
-        """Real model constrained by enum grammar outputs only valid options."""
+        """受枚举语法约束的真实模型只能输出有效选项。"""
         from agent_core.llm_engine import ChatLlamaCpp
 
         grammar = build_enum_grammar(["alpha", "beta", "gamma"])
@@ -238,7 +236,7 @@ class TestEnumGrammar:
             [{"role": "user", "content": "Say only one word: alpha"}],
             grammar=grammar,
         )
-        # Strip quotes that the model might wrap the output in
+        # 去除模型可能包裹在输出外部的引号。
         content = result.content.strip().strip('"').strip()
         assert content in {"alpha", "beta", "gamma"}, (
             f"Expected one of alpha/beta/gamma, got {content!r}"
@@ -246,11 +244,11 @@ class TestEnumGrammar:
 
 
 # ============================================================================
-# 3. Tool-call schema correctness (2.5.3)
-# =============================================TestJsonSchemaRoundTrip===============================
+# 3. 工具调用 Schema 正确性（2.5.3）
+# ================================= JSON Schema 往返测试 =================================
 
 class TestToolCallGrammar:
-    """Acceptance: build_tool_call_grammar output has correct tool + arguments."""
+    """验收：build_tool_call_grammar 输出包含正确的工具及参数。"""
 
     SEARCH_TOOL = {
         "name": "search_log",
@@ -308,7 +306,7 @@ class TestToolCallGrammar:
 
     @_real_model_pytest_mark
     def test_tool_call_grammar_real_model(self):
-        """Real model constrained by tool-call grammar outputs valid tool + args."""
+        """受工具调用语法约束的真实模型输出有效的工具及参数。"""
         from agent_core.llm_engine import ChatLlamaCpp
 
         grammar = build_tool_call_grammar([self.SEARCH_TOOL])
@@ -336,11 +334,11 @@ class TestToolCallGrammar:
 
 
 # ============================================================================
-# 4. Unsupported $ref rejection (2.5.4)
+# 4. 拒绝不支持的 $ref（2.5.4）
 # ============================================================================
 
 class TestRefRejection:
-    """Acceptance: $ref → GrammarCompileError with field path, never silent."""
+    """验收：遇到 $ref 时抛出含字段路径的 GrammarCompileError，绝不静默处理。"""
 
     def test_top_level_ref_raises(self):
         schema = {"$ref": "#/definitions/Foo"}
@@ -358,7 +356,7 @@ class TestRefRejection:
             build_json_grammar(schema)
         msg = str(exc_info.value)
         assert "$ref" in msg
-        # Error message should contain the path to help debugging
+        # 错误消息应包含路径，以便调试。
         assert "data" in msg or "$/properties/data/$ref" in msg
 
     def test_deeply_nested_ref_raises_with_path(self):
@@ -389,14 +387,14 @@ class TestRefRejection:
 
 
 # ============================================================================
-# 5. Cache effectiveness (2.5.5)
+# 5. 缓存有效性（2.5.5）
 # ============================================================================
 
 class TestCacheEffectiveness:
-    """Acceptance: 10 calls with same schema → 1 underlying compile invocation."""
+    """验收：对同一 Schema 调用 10 次时，底层仅编译一次。"""
 
     def test_repeated_calls_hit_cache(self):
-        """10 identical calls should trigger compile_json_schema_to_gbnf only once."""
+        """10 次相同调用应只触发一次 compile_json_schema_to_gbnf。"""
         schema = {
             "type": "object",
             "properties": {
@@ -426,7 +424,7 @@ class TestCacheEffectiveness:
         )
 
     def test_reordered_keys_hit_same_cache_entry(self):
-        """Same schema with different key ordering hits the LRU cache."""
+        """键顺序不同的同一 Schema 应命中相同的 LRU 缓存项。"""
         schema_a = {"type": "object", "properties": {"b": {"type": "integer"}, "a": {"type": "string"}}}
         schema_b = {"type": "object", "properties": {"a": {"type": "string"}, "b": {"type": "integer"}}}
 
@@ -452,7 +450,7 @@ class TestCacheEffectiveness:
         )
 
     def test_different_schemas_are_not_cached_together(self):
-        """Distinct schemas trigger separate compilations."""
+        """不同 Schema 应分别触发编译。"""
         schema_a = {"type": "object", "properties": {"x": {"type": "integer"}}}
         schema_b = {"type": "object", "properties": {"y": {"type": "string"}}}
 
@@ -478,30 +476,30 @@ class TestCacheEffectiveness:
         )
 
 # ============================================================================
-# 6. Edge cases & robustness
+# 6. 边界情况与健壮性
 # ============================================================================
 
 class TestEdgeCases:
-    """Additional coverage for boundary conditions."""
+    """补充覆盖边界条件。"""
 
     def test_validate_no_refs_with_non_dict(self):
-        """Non-dict values should not cause a crash during validation."""
+        """非字典值不应导致校验过程崩溃。"""
         _validate_no_unresolved_refs({"type": "array", "items": {}})
 
     def test_validate_no_refs_passes_clean_schema(self):
-        """A clean schema with no $ref should pass validation silently."""
+        """不含 $ref 的干净 Schema 应静默通过校验。"""
         _validate_no_unresolved_refs({
             "type": "object",
             "properties": {"ok": {"type": "boolean"}},
         })
 
     def test_build_json_grammar_malformed_schema(self):
-        """A schema that the GBNF compiler can't handle should raise GrammarCompileError."""
+        """GBNF 编译器无法处理的 Schema 应抛出 GrammarCompileError。"""
         with pytest.raises(GrammarCompileError):
             build_json_grammar({"type": "this-type-does-not-exist"})
 
     def test_build_enum_grammar_quotes_in_options(self):
-        """Options containing double-quotes should still produce valid GBNF."""
+        """包含双引号的选项仍应生成有效的 GBNF。"""
         result = build_enum_grammar(['he said "hello"'])
         result = result._grammar
         assert "root ::=" in result
@@ -509,16 +507,16 @@ class TestEdgeCases:
 
 
 # ============================================================================
-# 8. build_json_grammar: real-model round-trip with jsonschema validation
+# 8. build_json_grammar：结合 jsonschema 校验的真实模型往返测试
 # ============================================================================
 
 class TestJsonSchemaValidation:
-    """Verify that model output constrained by build_json_grammar passes
-    jsonschema.validate() against the original schema."""
+    """验证受 build_json_grammar 约束的模型输出可通过原始 Schema 的
+    jsonschema.validate() 校验。"""
 
     @_real_model_pytest_mark
     def test_output_validates_against_original_schema(self):
-        """Grammar-constrained output must validate via jsonschema."""
+        """受语法约束的输出必须通过 jsonschema 校验。"""
         from agent_core.llm_engine import ChatLlamaCpp
 
         schema = {
@@ -548,7 +546,7 @@ class TestJsonSchemaValidation:
 
     @_real_model_pytest_mark
     def test_output_with_array_schema(self):
-        """Array-type schema → model outputs valid array."""
+        """数组类型 Schema 应使模型输出有效数组。"""
         from agent_core.llm_engine import ChatLlamaCpp
 
         schema = {

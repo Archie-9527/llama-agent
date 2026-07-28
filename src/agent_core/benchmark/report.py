@@ -1,4 +1,4 @@
-"""Generate a compact, deterministic Markdown report from structured data."""
+"""根据结构化数据生成紧凑、确定性的 Markdown 报告。"""
 
 from __future__ import annotations
 

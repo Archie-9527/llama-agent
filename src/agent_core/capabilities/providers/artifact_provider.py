@@ -1,4 +1,4 @@
-"""Read-only Agent tools for task-owned externalized tool results."""
+"""用于读取任务自有外置工具结果的只读 Agent 工具。"""
 
 from __future__ import annotations
 

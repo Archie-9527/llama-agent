@@ -1,8 +1,7 @@
-"""Tests for the graph orchestration layer (Stage 2).
+"""测试图编排层（阶段二）。
 
-Covers acceptance criteria A1–A20 from the orchestration-layer design
-doc.  Most tests use mocked LLM engines / tools so they run without a
-real GGUF model.
+覆盖编排层设计文档中的验收标准 A1–A20。多数测试使用模拟的大模型引擎
+和工具，因此无需真实 GGUF 模型即可运行。
 """
 
 from __future__ import annotations
@@ -74,12 +73,12 @@ from agent_core.graph.react_agent_factory import (
 from agent_core.graph.checkpointer import get_checkpointer
 
 
-# ── Fixtures ─────────────────────────────────────────────────────────────────
+# ── 测试夹具 ─────────────────────────────────────────────────────────────────
 
 
 @pytest.fixture(autouse=True)
 def _reset_registry():
-    """Clear the capability registry before every test."""
+    """每项测试前清空能力注册表。"""
     clear_registry()
     yield
     clear_registry()
@@ -87,7 +86,7 @@ def _reset_registry():
 
 @pytest.fixture
 def base_state() -> AgentState:
-    """Minimal valid AgentState with defaults."""
+    """包含默认值的最小有效 AgentState。"""
     return AgentState(
         task_goal="",
         plan_steps=[],
@@ -101,7 +100,7 @@ def base_state() -> AgentState:
 
 
 def _register_test_tools():
-    """Register a couple of test capabilities."""
+    """注册两个测试能力。"""
     @register(
         name="echo",
         description="Echo back the input",
@@ -132,18 +131,18 @@ def _register_test_tools():
         return str(a + b)
 
 
-# ── Acceptance A1: Planner normal output ─────────────────────────────────────
+# ── 验收 A1：规划器正常输出 ──────────────────────────────────────────────────
 
 
 class TestPlannerNormalOutput:
-    """A1: Given a valid task_goal, planner_node produces a non-empty
-    list[str] plan_steps and status == 'executing'."""
+    """A1：给定有效 task_goal，planner_node 生成非空的 list[str] plan_steps，
+    且 status == 'executing'。"""
 
     def test_planner_produces_valid_plan(self, base_state):
-        """Planner should parse a valid JSON response into plan_steps."""
+        """规划器应将有效 JSON 响应解析为 plan_steps。"""
         base_state["task_goal"] = "Write a report"
 
-        # Mock the engine to return a valid plan JSON
+        # 模拟引擎返回有效的计划 JSON。
         mock_engine = MagicMock()
         mock_response = MagicMock()
         mock_response.content = json.dumps({
@@ -215,12 +214,12 @@ class TestFinalizerFallback:
         )
 
 
-# ── Acceptance A2: Planner exception translation ─────────────────────────────
+# ── 验收 A2：规划器异常转换 ──────────────────────────────────────────────────
 
 
 class TestPlannerExceptionTranslation:
-    """A2: Mock engine.invoke to return illegal JSON — must raise
-    PlanningError, not raw json.JSONDecodeError."""
+    """A2：模拟 engine.invoke 返回非法 JSON，必须抛出 PlanningError，
+    而非原始 json.JSONDecodeError。"""
 
     def test_invalid_json_raises_planning_error(self, base_state):
         base_state["task_goal"] = "test"
@@ -235,7 +234,7 @@ class TestPlannerExceptionTranslation:
                 planner_node(base_state)
 
         assert "not valid json" in str(exc_info.value)
-        # Must NOT be a raw JSONDecodeError
+        # 不得为原始 JSONDecodeError。
         assert not isinstance(exc_info.value, json.JSONDecodeError)
 
     def test_missing_steps_key_raises_planning_error(self, base_state):
@@ -275,7 +274,7 @@ class TestPlannerExceptionTranslation:
                 planner_node(base_state)
 
     def test_planning_error_is_agent_core_error(self, base_state):
-        """PlanningError must be catchable via AgentCoreError (design doc §7)."""
+        """PlanningError 必须可由 AgentCoreError 捕获（设计文档第 7 节）。"""
         base_state["task_goal"] = "test"
         mock_engine = MagicMock()
         mock_response = MagicMock()
@@ -292,14 +291,14 @@ class TestPlannerExceptionTranslation:
                 pytest.fail("PlanningError should be caught by AgentCoreError")
 
 
-# ── Acceptance A3–A7: Executor node ──────────────────────────────────────────
+# ── 验收 A3–A7：执行器节点 ───────────────────────────────────────────────────
 
 
 class TestExecutorStateBridging:
-    """A3–A8: Executor state-bridging and output parsing."""
+    """A3–A8：执行器状态桥接与输出解析。"""
 
     def test_extract_execution_result_no_tool_calls(self):
-        """A3: Single AIMessage with no tool_calls → 1 record, tool_used is None."""
+        """A3：不含 tool_calls 的单个 AIMessage 生成一条记录，tool_used 为 None。"""
         messages = [AIMessage(content="The answer is 42.")]
         records = _extract_execution_result(messages, "think step")
         assert len(records) == 1
@@ -328,11 +327,11 @@ class TestExecutorStateBridging:
         assert str(compacted[1].content).startswith("HEAD")
         assert str(compacted[1].content).endswith("FINAL_EVIDENCE")
         assert "tool result compacted" in str(compacted[1].content)
-        # The original graph-state message remains untouched.
+        # 原始图状态消息保持不变。
         assert original.content == original_content
 
     def test_extract_execution_result_multiple_tools(self):
-        """A4: AIMessage with 2 tool_calls → 2+ records, tool_used matches."""
+        """A4：含两个 tool_calls 的 AIMessage 生成至少两条记录，且 tool_used 匹配。"""
         messages = [
             AIMessage(
                 content="",
@@ -486,7 +485,7 @@ class TestExecutorStateBridging:
             _validate_required_tool_execution("count", records)
 
     def test_missing_tool_message_raises_execution_error(self):
-        """A7: Missing ToolMessage → ExecutionError with tool_call_id."""
+        """A7：缺失 ToolMessage 时抛出包含 tool_call_id 的 ExecutionError。"""
         messages = [
             AIMessage(
                 content="",
@@ -494,7 +493,7 @@ class TestExecutorStateBridging:
                     ToolCall(name="echo", args={"message": "hi"}, id="call_1"),
                 ],
             ),
-            # ToolMessage intentionally omitted
+            # 有意省略 ToolMessage。
             AIMessage(content="Done."),
         ]
         with pytest.raises(ExecutionError) as exc_info:
@@ -502,7 +501,7 @@ class TestExecutorStateBridging:
         assert "call_1" in str(exc_info.value)
 
     def test_normalize_output_messages_dict_format(self):
-        """A8: Dict-format messages normalised to BaseMessage."""
+        """A8：字典格式消息规范化为 BaseMessage。"""
         raw_messages = [
             {"role": "assistant", "content": "Hello world"},
             {"role": "user", "content": "Hi"},
@@ -515,7 +514,7 @@ class TestExecutorStateBridging:
         assert normalised[1].content == "Hi"
 
     def test_normalize_output_messages_mixed_format(self):
-        """A8: Mixed dict + BaseMessage list produces consistent BaseMessage list."""
+        """A8：混合字典和 BaseMessage 的列表生成一致的 BaseMessage 列表。"""
         raw_messages = [
             AIMessage(content="I am already a message"),
             {"role": "assistant", "content": "I am a dict"},
@@ -528,10 +527,10 @@ class TestExecutorStateBridging:
 
 
 class TestExecutorNode:
-    """A3–A6: Executor integration tests with mocked inner agent."""
+    """A3–A6：使用模拟内部 Agent 的执行器集成测试。"""
 
     def test_executor_single_step_no_tool(self, base_state):
-        """A3: Executor runs a simple step, produces 1 record with tool_used=None."""
+        """A3：执行器运行简单步骤并生成一条 tool_used=None 的记录。"""
         _register_test_tools()
         base_state["task_goal"] = "test"
         base_state["plan_steps"] = ["Say hello"]
@@ -542,7 +541,7 @@ class TestExecutorNode:
         mock_engine.get_num_tokens.side_effect = lambda text: len(str(text))
         mock_engine.invoke.return_value = AIMessage(content="Hello!")
 
-        # Build a mock config with the thread_id that executor_node expects
+        # 构造包含 executor_node 所需 thread_id 的模拟配置。
         mock_config = {"configurable": {"thread_id": "test-thread"}}
 
         with patch(
@@ -609,7 +608,7 @@ class TestExecutorNode:
         ) is True
 
     def test_executor_multiple_steps_status_stays_executing(self, base_state):
-        """A5: With 3 plan steps, executor stays at 'executing' until last step."""
+        """A5：存在三个计划步骤时，执行器在最后一步前保持 executing 状态。"""
         _register_test_tools()
         base_state["task_goal"] = "test"
         base_state["plan_steps"] = [
@@ -642,23 +641,23 @@ class TestExecutorNode:
 
         with patch("agent_core.graph.executor._build_react_input", return_value={"messages": [SystemMessage(content="test")]}), \
              patch("agent_core.graph.react_agent_factory.initialize_react_agent", return_value=mock_agent):
-            # Step 1
+            # 步骤 1
             result = executor_node(base_state, config=mock_config)  # type: ignore[call-arg]
             assert result["current_step_index"] == 1
-            assert result["status"] != "reflecting"  # more steps remain
+            assert result["status"] != "reflecting"  # 仍有后续步骤
 
-            # Step 2
+            # 步骤 2
             result = executor_node(result, config=mock_config)  # type: ignore[call-arg]
             assert result["current_step_index"] == 2
             assert result["status"] != "reflecting"
 
-            # Step 3 — last step
+            # 步骤 3：最后一步
             result = executor_node(result, config=mock_config)  # type: ignore[call-arg]
             assert result["current_step_index"] == 3
             assert result["status"] == "reflecting"
 
     def test_executor_recursion_limit_raises_execution_error(self, base_state):
-        """A6: recursion limit exceeded → ExecutionError."""
+        """A6：超过递归限制时抛出 ExecutionError。"""
         _register_test_tools()
         base_state["task_goal"] = "test"
         base_state["plan_steps"] = ["Use echo in a step that loops forever"]
@@ -675,7 +674,7 @@ class TestExecutorNode:
             assert "recursion" in str(exc_info.value).lower()
 
     def test_executor_out_of_range_step_raises(self, base_state):
-        """Calling executor with current_step_index beyond plan_steps → ExecutionError."""
+        """current_step_index 超出 plan_steps 时调用执行器应抛出 ExecutionError。"""
         base_state["plan_steps"] = []
         base_state["current_step_index"] = 0
         mock_config = {"configurable": {"thread_id": "test-thread"}}
@@ -683,11 +682,11 @@ class TestExecutorNode:
             executor_node(base_state, config=mock_config)  # type: ignore[call-arg]
 
 
-# ── Acceptance A9: Reflector enum strictness ─────────────────────────────────
+# ── 验收 A9：反思器枚举严格性 ────────────────────────────────────────────────
 
 
 class TestReflector:
-    """A9: reflector_node enforces strict enum validation."""
+    """A9：reflector_node 执行严格的枚举校验。"""
 
     def test_reflector_valid_decision_done(self, base_state):
         base_state["task_goal"] = "test"
@@ -771,7 +770,7 @@ class TestReflector:
         assert "decision=done" in result["reflection_notes"][-1]
 
     def test_reflector_invalid_decision_raises(self, base_state):
-        """A9: Any decision outside {done, continue, failed} → ReflectionError."""
+        """A9：不在 {done, continue, failed} 中的决策应触发 ReflectionError。"""
         base_state["task_goal"] = "test"
 
         mock_engine = MagicMock()
@@ -785,7 +784,7 @@ class TestReflector:
                 reflector_node(base_state)
 
     def test_reflector_quoted_decision_stripped(self, base_state):
-        """Enum grammar may produce quoted strings — reflector should strip them."""
+        """枚举语法可能生成带引号字符串，反思器应去除引号。"""
         base_state["task_goal"] = "test"
 
         mock_engine = MagicMock()
@@ -829,14 +828,14 @@ class TestReflector:
         assert "iteration limit" in result["reflection_notes"][-1]
 
 
-# ── Acceptance A10–A11: Routing logic ────────────────────────────────────────
+# ── 验收 A10–A11：路由逻辑 ───────────────────────────────────────────────────
 
 
 class TestRoutingFunctions:
-    """A10–A11: _route_after_executor and _route_after_reflector."""
+    """A10–A11：测试 _route_after_executor 与 _route_after_reflector。"""
 
     def test_route_after_executor_more_steps(self):
-        """More steps remain → return 'executor'."""
+        """仍有步骤时返回 executor。"""
         state = AgentState(
             task_goal="t", plan_steps=["a", "b", "c"],
             current_step_index=1, execution_log=[], reflection_notes=[],
@@ -845,7 +844,7 @@ class TestRoutingFunctions:
         assert _route_after_executor(state) == "executor"
 
     def test_route_after_executor_all_done(self):
-        """All steps done → return 'reflector'."""
+        """所有步骤完成后返回 reflector。"""
         state = AgentState(
             task_goal="t", plan_steps=["a", "b"],
             current_step_index=2, execution_log=[], reflection_notes=[],
@@ -854,7 +853,7 @@ class TestRoutingFunctions:
         assert _route_after_executor(state) == "reflector"
 
     def test_route_after_reflector_done(self):
-        """A10: Reflector says 'done' → stable-answer Finalizer."""
+        """A10：反思器返回 done 时进入稳定答案终结器。"""
         state = AgentState(
             task_goal="t", plan_steps=["a"], current_step_index=1,
             execution_log=[], reflection_notes=[],
@@ -863,7 +862,7 @@ class TestRoutingFunctions:
         assert _route_after_reflector(state) == "finalizer"
 
     def test_route_after_reflector_failed(self):
-        """Reflector says 'failed' → END."""
+        """反思器返回 failed 时进入 END。"""
         state = AgentState(
             task_goal="t", plan_steps=["a"], current_step_index=1,
             execution_log=[], reflection_notes=[],
@@ -873,7 +872,7 @@ class TestRoutingFunctions:
         assert _route_after_reflector(state) == END
 
     def test_route_after_reflector_continue(self):
-        """Reflector says 'continue' → 'planner'."""
+        """反思器返回 continue 时进入 planner。"""
         state = AgentState(
             task_goal="t", plan_steps=["a"], current_step_index=1,
             execution_log=[], reflection_notes=[],
@@ -882,7 +881,7 @@ class TestRoutingFunctions:
         assert _route_after_reflector(state) == "planner"
 
     def test_route_after_reflector_max_iterations(self):
-        """A11: Reflector says 'continue' but max_iterations reached → END."""
+        """A11：反思器返回 continue 但达到 max_iterations 时进入 END。"""
         state = AgentState(
             task_goal="t", plan_steps=["a"], current_step_index=1,
             execution_log=[], reflection_notes=[],
@@ -892,14 +891,14 @@ class TestRoutingFunctions:
         assert _route_after_reflector(state) == END
 
 
-# ── Acceptance A12–A14: Checkpoint persistence ───────────────────────────────
+# ── 验收 A12–A14：检查点持久化 ───────────────────────────────────────────────
 
 
 class TestCheckpointer:
-    """A12–A14: SqliteSaver integration."""
+    """A12–A14：SqliteSaver 集成。"""
 
     def test_get_checkpointer_creates_directory(self, tmp_path):
-        """A12: get_checkpointer creates db parent dir and yields SqliteSaver."""
+        """A12：get_checkpointer 创建数据库父目录并生成 SqliteSaver。"""
         db_path = tmp_path / "sub" / "checkpoints.sqlite"
         with get_checkpointer(db_path) as cp:
             assert cp is not None
@@ -907,19 +906,17 @@ class TestCheckpointer:
         assert db_path.exists()
 
     def test_checkpointer_basic_write(self, tmp_path):
-        """A12: Fixed thread_id with checkpointer — verify persistence.
+        """A12：使用固定 thread_id 和检查点器验证持久化。
 
-        Uses a minimal pass-through graph to avoid requiring a real LLM
-        engine.  The full graph (planner → executor → reflector) requires
-        a `model_path` for `get_engine()`, so checkpoint persistence is
-        verified with a simpler graph that exercises the same SqliteSaver
-        code path.
+        使用最小透传图避免依赖真实大模型引擎。完整图（规划器→执行器→反思器）
+        调用 get_engine() 时需要 model_path，因此改用走同一 SqliteSaver
+        代码路径的简单图验证检查点持久化。
         """
         from langgraph.graph import StateGraph, END
 
         db_path = tmp_path / "checkpoints.sqlite"
 
-        # Minimal graph that just copies the state through
+        # 仅透传状态的最小图。
         graph = StateGraph(AgentState)
         def passthrough(state: AgentState) -> AgentState:
             return state
@@ -943,15 +940,14 @@ class TestCheckpointer:
             result = compiled.invoke(initial_state, config=config)
             assert result["task_goal"] == "test write"
 
-        # After context exits, the db file should exist
+        # 退出上下文后，数据库文件应存在。
         assert db_path.exists()
 
     def test_checkpointer_different_thread_ids_isolated(self, tmp_path):
-        """A14: Two different thread_ids run independently — structural check.
+        """A14：两个不同 thread_id 独立运行的结构检查。
 
-        Verifies the checkpointer factory works correctly; actual isolation
-        is guaranteed by LangGraph's checkpoint system and is tested with
-        the minimal pass-through graph.
+        验证检查点器工厂工作正常；实际隔离由 LangGraph 检查点系统保证，
+        并通过最小透传图进行测试。
         """
         from langgraph.graph import StateGraph, END
 
@@ -987,19 +983,18 @@ class TestCheckpointer:
             assert r2["task_goal"] == "task two"
 
 
-# ── Acceptance A15: Inner subgraph has no checkpointer ────────────────────────
+# ── 验收 A15：内部子图不含检查点器 ──────────────────────────────────────────
 
 
 class TestInnerSubgraphNoCheckpointer:
-    """A15: Verify the inner ReAct subgraph has no checkpointer."""
+    """A15：验证内部 ReAct 子图没有检查点器。"""
 
     def test_create_agent_path_no_checkpointer(self):
-        """The create_agent call must pass checkpointer=None."""
+        """create_agent 调用必须传入 checkpointer=None。"""
         from agent_core.graph.react_agent_factory import _build_via_create_agent
 
-        # We cannot call _build_via_create_agent without a real LLM engine,
-        # but we can statically verify the source code explicitly sets
-        # checkpointer=None in the create_agent call.
+        # 没有真实大模型引擎时无法调用 _build_via_create_agent，
+        # 但可静态验证源码在 create_agent 调用中显式设置 checkpointer=None。
         import inspect
         source = inspect.getsource(_build_via_create_agent)
         assert "checkpointer=None" in source, (
@@ -1007,56 +1002,56 @@ class TestInnerSubgraphNoCheckpointer:
         )
 
     def test_self_made_path_no_checkpointer(self):
-        """The self-made StateGraph compiles without checkpointer."""
+        """自建 StateGraph 在不含检查点器的情况下编译。"""
         from agent_core.graph.react_agent_factory import _build_via_self_made_stategraph
 
         import inspect
         source = inspect.getsource(_build_via_self_made_stategraph)
-        # The compile() call should NOT pass a checkpointer arg
-        # (graph.compile() with no args → no checkpointer)
+        # compile() 调用不应传入检查点器参数；
+        # 无参数调用 graph.compile() 即表示不含检查点器。
         assert "checkpointer" not in source, (
             "Self-made StateGraph must compile without checkpointer (A15)"
         )
 
 
-# ── Acceptance A16: LRU cache on get_react_agent ─────────────────────────────
+# ── 验收 A16：get_react_agent 的 LRU 缓存 ────────────────────────────────────
 
 
 class TestLruCache:
-    """A16: initialize_react_agent() returns same object on repeated calls."""
+    """A16：重复调用 initialize_react_agent() 返回同一对象。"""
 
     def test_lru_cache_returns_same_object(self):
-        """initialize_react_agent must have @lru_cache and return same instance."""
+        """initialize_react_agent 必须使用 @lru_cache 并返回同一实例。"""
         from agent_core.graph.react_agent_factory import initialize_react_agent
         assert hasattr(initialize_react_agent, "cache_info"), (
             "initialize_react_agent must be decorated with @lru_cache"
         )
 
 
-# ── Acceptance A18: Plan B switchability ─────────────────────────────────────
+# ── 验收 A18：备选方案可切换性 ──────────────────────────────────────────────
 
 
 class TestPlanBSwitchability:
-    """A18: USE_OFFICIAL_CREATE_AGENT env var toggles the build path."""
+    """A18：USE_OFFICIAL_CREATE_AGENT 环境变量切换构建路径。"""
 
     def test_self_made_graph_has_expected_nodes(self):
-        """The self-made StateGraph should have 'agent' and 'tools' nodes."""
+        """自建 StateGraph 应包含 agent 和 tools 节点。"""
         graph = _build_via_self_made_stategraph()
-        # The compiled graph's nodes can be inspected via get_graph()
+        # 可通过 get_graph() 检查已编译图的节点。
         nodes = graph.get_graph().nodes
         node_names = {n for n in nodes}  # type: ignore[var-annotated]
         assert "agent" in node_names, f"Self-made graph must contain 'agent' node; got {node_names}"
         assert "tools" in node_names, f"Self-made graph must contain 'tools' node; got {node_names}"
 
 
-# ── Acceptance A19: Single source of truth ───────────────────────────────────
+# ── 验收 A19：单一事实来源 ──────────────────────────────────────────────────
 
 
 class TestSingleSourceOfTruth:
-    """A19: initialize_react_agent tools come from list_capabilities()."""
+    """A19：initialize_react_agent 的工具来自 list_capabilities()。"""
 
     def test_tools_from_capability_registry(self):
-        """Registered capabilities must appear in the inner agent's tool list."""
+        """已注册能力必须出现在内部 Agent 的工具列表中。"""
         _register_test_tools()
         caps = list_capabilities()
         assert len(caps) == 2
@@ -1067,7 +1062,7 @@ class TestSingleSourceOfTruth:
             assert langchain_tool.description == cap.description
 
     def test_to_langchain_tool_no_properties(self):
-        """Capability with empty input_schema creates a valid tool."""
+        """input_schema 为空的能力也能创建有效工具。"""
         cap = Capability(
             name="no_arg_tool",
             description="A tool with no arguments",
@@ -1098,7 +1093,7 @@ class TestSingleSourceOfTruth:
         assert calls == ["once"]
 
     def test_existing_shell_tool_node_executes_real_handler(self):
-        """A structured call must reach the existing shell provider."""
+        """结构化调用必须到达现有 Shell 提供器。"""
         from agent_core.capabilities.providers.shell_provider import (
             ShellCapabilityProvider,
         )
@@ -1133,7 +1128,7 @@ class TestSingleSourceOfTruth:
         assert "llama-agent" in payload["stdout"]
 
     def test_official_agent_executes_tool_then_summarizes_without_tools(self):
-        """Full loop: structured call → real handler → tool-free final answer."""
+        """完整循环：结构化调用→真实处理器→不含工具调用的最终答案。"""
         from agent_core.capabilities.providers.shell_provider import (
             ShellCapabilityProvider,
         )
@@ -1204,15 +1199,15 @@ class TestSingleSourceOfTruth:
         assert output["messages"][-1].content == "当前目录是 llama-agent 项目目录。"
 
 
-# ── Acceptance A20: Architecture isolation ───────────────────────────────────
+# ── 验收 A20：架构隔离 ──────────────────────────────────────────────────────
 
 
 class TestArchitectureIsolation:
-    """A20: No ``import llama_cpp`` in graph/ files;
-    no undeclared AgentState field assignments outside state.py."""
+    """A20：graph/ 文件中不导入 llama_cpp，且 state.py 外不为未声明的
+    AgentState 字段赋值。"""
 
     def test_no_llama_cpp_import_in_graph(self):
-        """Static scan — graph/*.py must not import llama_cpp."""
+        """静态扫描：graph/*.py 不得导入 llama_cpp。"""
         graph_dir = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             "agent_core", "graph",
@@ -1231,7 +1226,7 @@ class TestArchitectureIsolation:
         )
 
     def test_state_py_defines_all_fields(self):
-        """state.py declares every field used by graph/ nodes."""
+        """state.py 声明 graph/ 节点使用的所有字段。"""
         from agent_core.graph.state import AgentState
         hints = AgentState.__annotations__ if hasattr(AgentState, '__annotations__') else AgentState.__dict__.get('__annotations__', {})
         required = {
@@ -1247,15 +1242,15 @@ class TestArchitectureIsolation:
         assert set(hints.keys()) == required
 
 
-# ── Acceptance A17: Dynamic prompt (config-level check) ──────────────────────
+# ── 验收 A17：动态 Prompt（配置级检查）──────────────────────────────────────
 
 
 class TestDynamicPrompt:
-    """A17: Inner agent receives dynamic prompts via input messages,
-    not via a static system_prompt parameter at build time."""
+    """A17：内部 Agent 通过输入消息接收动态 Prompt，而非构建时的静态
+    system_prompt 参数。"""
 
     def test_create_agent_path_has_no_system_prompt(self):
-        """Source inspection — _build_via_create_agent passes system_prompt=None."""
+        """源码检查：_build_via_create_agent 传入 system_prompt=None。"""
         import inspect
         from agent_core.graph.react_agent_factory import _build_via_create_agent
         source = inspect.getsource(_build_via_create_agent)
@@ -1264,17 +1259,17 @@ class TestDynamicPrompt:
         )
 
 
-# ── Integration: full graph with mocked nodes ────────────────────────────────
+# ── 集成：使用模拟节点的完整图 ──────────────────────────────────────────────
 
 
 class TestFullGraphIntegration:
-    """End-to-end graph flow with mocked engine."""
+    """使用模拟引擎验证端到端图流程。"""
 
     def test_graph_compiles_without_checkpointer(self):
-        """build_graph() without checkpointer returns a compiled graph."""
+        """不带检查点器的 build_graph() 返回已编译图。"""
         graph = build_graph()
         assert graph is not None
-        # Should have nodes "planner", "executor", "reflector"
+        # 应包含 planner、executor、reflector 节点。
         nodes = graph.get_graph().nodes
         node_names = {n for n in nodes}  # type: ignore[var-annotated]
         assert "planner" in node_names
@@ -1282,33 +1277,30 @@ class TestFullGraphIntegration:
         assert "reflector" in node_names
 
     def test_graph_routing_with_done_skips_nodes(self):
-        """build_graph() returns a compiled graph.  When the initial state has
-        status='done', the entry routing should immediately hit the planner
-        node, but the planner immediately invokes the engine.  Integration
-        tests requiring a real LLM are skipped here — this test verifies
-        the graph structure is correct."""
-        # This is a structural-only test — real graph invocation requires
-        # a properly configured LLM engine (model_path).
+        """build_graph() 返回已编译图。初始状态为 status='done' 时，入口路由
+        会立即到达规划器，但规划器会随即调用引擎。这里跳过依赖真实大模型的
+        集成调用，只验证图结构正确。"""
+        # 这只是结构测试；真实图调用需要正确配置大模型引擎的 model_path。
         graph = build_graph()
         nodes = graph.get_graph().nodes
         assert "planner" in {n for n in nodes}  # type: ignore[var-annotated]
         assert "reflector" in {n for n in nodes}  # type: ignore[var-annotated]
 
     def test_graph_routing_with_failed_skips_nodes(self):
-        """Same structural check for failed status."""
+        """对 failed 状态执行同样的结构检查。"""
         graph = build_graph()
         nodes = graph.get_graph().nodes
         assert "planner" in {n for n in nodes}  # type: ignore[var-annotated]
 
     def test_exception_hierarchy_consistent(self):
-        """GraphOrchestrationError is properly in the hierarchy."""
+        """GraphOrchestrationError 位于正确的异常层级中。"""
         assert issubclass(GraphOrchestrationError, AgentCoreError)
         assert issubclass(PlanningError, GraphOrchestrationError)
         assert issubclass(ExecutionError, GraphOrchestrationError)
         assert issubclass(ReflectionError, GraphOrchestrationError)
 
     def test_react_agent_state_fields(self):
-        """The self-made ReActState has the expected messages field."""
+        """自建 ReActState 包含预期的 messages 字段。"""
         import inspect
         source = inspect.getsource(_ReActState)
         assert "messages" in source

@@ -1,9 +1,8 @@
-"""Auto-discover and import all provider modules.
+"""自动发现并导入所有 Provider 模块。
 
-Dropping a new ``xxx_provider.py`` into this directory is all that is
-needed to register a new capability provider — ``pkgutil.iter_modules``
-discovers it and the ``@register_provider`` decorator fires at import
-time.
+注册新能力 Provider 时只需在本目录添加 ``xxx_provider.py``；
+``pkgutil.iter_modules`` 会发现它，并在导入时触发 ``@register_provider``
+装饰器。
 """
 
 import importlib

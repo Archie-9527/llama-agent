@@ -1,16 +1,14 @@
-"""Reflector node — evaluate execution progress and decide the next action.
+"""Reflector 节点——评估执行进度并决定下一步操作。
 
-The Reflector is the decision-gate of the outer graph.  It examines
-the task goal, the plan, and the execution log, then emits one of
-three decisions via an enum-constrained LLM call:
+Reflector 是外层图的决策门。它检查任务目标、计划和执行日志，然后通过受枚举
+约束的 LLM 调用产生三种决策之一：
 
-    * ``done``     — the task goal has been fully achieved.
-    * ``continue`` — more work is needed; loop back to the Planner.
-    * ``failed``   — an unrecoverable error has been encountered.
+    * ``done``——任务目标已经完全实现。
+    * ``continue``——仍需继续工作，返回 Planner。
+    * ``failed``——遇到不可恢复的错误。
 
-The routing logic that acts on this decision lives in
-``build_graph.py``, not here — the Reflector only **produces** the
-decision, keeping the "how to route" logic in a single file.
+执行该决策的路由逻辑位于 ``build_graph.py``，不在本文件中。Reflector 只负责
+**产生**决策，从而将“如何路由”的逻辑集中在一个文件中。
 """
 
 from __future__ import annotations
@@ -28,7 +26,7 @@ if TYPE_CHECKING:
     from agent_core.graph.state import AgentState
 
 # ---------------------------------------------------------------------------
-# The set of decisions the Reflector is allowed to emit.
+# Reflector 允许输出的决策集合。
 # ---------------------------------------------------------------------------
 
 _VALID_DECISIONS = {"done", "continue", "failed"}
@@ -50,12 +48,11 @@ REFLECTION_SCHEMA: dict = {
 
 
 def _parse_reflection_output(raw: str) -> object:
-    """Parse one constrained value while tolerating harmless trailing text.
+    """解析一个受约束的值，同时容忍无害的尾随文本。
 
-    Some local models emit a valid JSON object and then append a Markdown
-    explanation despite grammar/prompt constraints.  ``raw_decode`` preserves
-    strict validation of the first JSON value without accepting a fabricated
-    decision from arbitrary prose.
+    某些本地模型即使受到 Grammar/Prompt 约束，仍会在有效 JSON 对象后附加
+    Markdown 说明。``raw_decode`` 会严格校验第一个 JSON 值，同时避免从任意
+    文本中接受虚构决策。
     """
     stripped = raw.strip()
     try:
@@ -77,9 +74,8 @@ def _parse_reflection_output(raw: str) -> object:
                 continue
             if isinstance(value, dict) and "decision" in value:
                 return value
-        # Qwen occasionally closes the final JSON string with a typographic
-        # quote (”) before appending prose.  Recover only the exact constrained
-        # reflection shape and still validate the enum in ``reflector_node``.
+    # Qwen 偶尔会用排版引号（”）结束最后一个 JSON 字符串，再附加说明文本。
+    # 此处只恢复精确的受约束反思结构，随后仍在 ``reflector_node`` 中校验枚举。
         near_json = re.search(
             r'\{\s*"decision"\s*:\s*"(?P<decision>done|continue|failed)"\s*,'
             r'\s*"reason"\s*:\s*"(?P<reason>.*?)(?:"|”)\s*\}',
@@ -88,37 +84,35 @@ def _parse_reflection_output(raw: str) -> object:
         )
         if near_json:
             return near_json.groupdict()
-        # Backward compatibility for old checkpoints/tests that returned a
-        # bare, optionally quoted enum instead of the structured schema.
+    # 向后兼容旧 Checkpoint 和测试：它们可能返回不带结构、可选引号包裹的枚举，
+    # 而不是结构化 Schema。
         return stripped.strip('"').strip("'")
 
 
 # ---------------------------------------------------------------------------
-# [STABLE] reflector_node
+# [稳定接口] reflector_node
 # ---------------------------------------------------------------------------
 
 
 def reflector_node(state: "AgentState") -> "AgentState":
-    """Evaluate execution progress and emit a routing decision.
+    """评估执行进度并输出路由决策。
 
-    Steps:
-        1. Assemble the reflection prompt (task goal + plan + execution log).
-        2. Build a JSON grammar containing ``decision`` and diagnostic
-           ``reason`` fields.
-        3. Invoke the engine and extract the structured decision.
-        4. Append a note to ``reflection_notes``, increment
-           ``current_iteration``, and set ``status`` to the decision.
+    步骤：
+        1. 组装反思 Prompt（任务目标 + 计划 + 执行日志）。
+        2. 构建包含 ``decision`` 和诊断字段 ``reason`` 的 JSON Grammar。
+        3. 调用引擎并提取结构化决策。
+        4. 向 ``reflection_notes`` 追加记录，递增 ``current_iteration``，
+           并将 ``status`` 设置为该决策。
 
-    The ``status`` field is a **temporary** value — ``build_graph.py``'s
-    conditional-edge function is the final arbiter that decides whether
-    to honour it or force-terminate (e.g. due to ``max_iterations``).
+    ``status`` 字段是**临时**值；``build_graph.py`` 的条件边函数是最终裁决者，
+    负责决定接受该值还是强制终止，例如达到 ``max_iterations`` 时。
 
-    Returns:
-        *state* mutated with a new reflection note and updated status.
+    返回：
+        写入新反思记录并更新状态后的 *state*。
 
-    Raises:
-        ReflectionError: If the model output is not a member of
-            ``{"done", "continue", "failed"}``.
+    异常：
+        ReflectionError：模型输出不属于
+            ``{"done", "continue", "failed"}`` 时抛出。
     """
     engine = get_engine()
     messages = assemble_reflection_prompt(state, engine)
@@ -132,7 +126,7 @@ def reflector_node(state: "AgentState") -> "AgentState":
         decision = str(parsed.get("decision", "")).strip()
         reason = str(parsed.get("reason", "")).strip()
     else:
-        # Backward compatibility for old checkpoints and lightweight tests.
+    # 向后兼容旧 Checkpoint 和轻量测试。
         decision = str(parsed).strip()
 
     if decision not in _VALID_DECISIONS:
@@ -141,7 +135,7 @@ def reflector_node(state: "AgentState") -> "AgentState":
             f"expected one of {sorted(_VALID_DECISIONS)}."
         )
 
-    # Record the decision
+    # 记录决策
     current_iteration: int = state.get("current_iteration", 0)
     note = f"[iteration {current_iteration}] decision={decision}"
     if reason:
@@ -153,9 +147,8 @@ def reflector_node(state: "AgentState") -> "AgentState":
     state["reflection_notes"] = reflection_notes
     state["current_iteration"] = next_iteration
 
-    # Do not return a misleading non-terminal ``continue`` status when the
-    # safety cap has already been exhausted.  Mark the task as failed and
-    # leave an explicit diagnostic for CLI/API consumers.
+    # 安全上限已经耗尽时，不要返回具有误导性的非终止 ``continue`` 状态。
+    # 将任务标记为失败，并为 CLI/API 调用方留下明确诊断。
     max_iterations: int = state.get("max_iterations", 10)
     if decision == "continue" and next_iteration >= max_iterations:
         state["reflection_notes"].append(

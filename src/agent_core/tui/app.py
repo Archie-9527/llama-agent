@@ -1,4 +1,4 @@
-"""Textual application for the non-streaming interactive Agent CLI."""
+"""用于非流式交互 Agent CLI 的 Textual 应用。"""
 
 from __future__ import annotations
 

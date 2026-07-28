@@ -1,97 +1,91 @@
-"""Custom exception hierarchy for the llama-agent system.
+"""llama-agent 系统的自定义异常层次结构。
 
-All agent-core exceptions ultimately inherit from ``AgentCoreError`` so that
-graph-level error-handling code can catch a single root type regardless of
-which layer the error came from.
+所有 agent-core 异常最终都继承自 ``AgentCoreError``，使图层错误处理代码无论
+异常来自哪一层，都只需捕获一个根类型。
 """
 
 from __future__ import annotations
 
 
-# ── Unified project root ────────────────────────────────────────────────────
+# ── 统一项目根异常 ─────────────────────────────────────────────────────────
 
 
 class AgentCoreError(Exception):
-    """Root exception for all agent-core modules.
+    """所有 agent-core 模块的根异常。
 
-    This is the single ancestor that graph-layer code should catch for
-    unified error logging / fallback across all internal subsystems:
-    engine, grammar, prompt assembly, knowledge scope, and capability registry.
+    图层代码应捕获这个唯一祖先类型，以便在引擎、Grammar、Prompt 组装、知识
+    范围和能力注册表等所有内部子系统中统一记录错误并执行后备处理。
     """
 
 
-# ── Inference-engine layer (legacy — kept for backward compat) ───────────────
+# ── 推理引擎层（为向后兼容而保留的旧接口）────────────────────────────────
 
 
 class AgentEngineError(AgentCoreError):
-    """Base for exceptions originating inside the inference engine."""
+    """推理引擎内部异常的基类。"""
 
 
 class ModelLoadError(AgentEngineError):
-    """GGUF model file is missing, corrupt, or otherwise unloadable."""
+    """GGUF 模型文件缺失、损坏或因其他原因无法加载。"""
 
 
 class GrammarCompileError(AgentCoreError):
-    """GBNF grammar compilation failed, or the JSON Schema contains unsupported
-    constructs (e.g. unresolved ``$ref``)."""
+    """GBNF Grammar 编译失败，或 JSON Schema 包含不支持的结构，例如未解析的
+    ``$ref``。"""
 
 
 class InferenceTimeoutError(AgentEngineError):
-    """Single inference call exceeded ``request_timeout`` without producing output."""
+    """单次推理调用超过 ``request_timeout``，且没有产生输出。"""
 
 
-# ── Standardised interface (prompt / knowledge) layer ────────────────────────
+# ── 标准接口（Prompt / 知识）层 ────────────────────────────────────────────
 
 
 class PromptAssemblyError(AgentCoreError):
-    """Base exception for prompt-assembly failures."""
+    """Prompt 组装失败的基类。"""
 
 
 class ContextBudgetExceededError(PromptAssemblyError):
-    """Context-window budget exhausted — even after aggressive trimming the
-    remaining content still exceeds the token limit."""
+    """上下文窗口预算耗尽——即使积极裁剪，剩余内容仍超过 Token 上限。"""
 
 
 class ToolConsistencyError(PromptAssemblyError):
-    """The human-readable tool descriptions embedded in the system prompt do
-    not match the tool set used for grammar constraint — the model sees a
-    different tool list than what the grammar actually permits."""
+    """嵌入 System Prompt 的人类可读工具描述与 Grammar 约束使用的工具集合不
+    一致——模型看到的工具列表与 Grammar 实际允许的列表不同。"""
 
 
-# ── Graph orchestration layer ────────────────────────────────────────────────
+# ── 图编排层 ───────────────────────────────────────────────────────────────
 
 
 class GraphOrchestrationError(AgentCoreError):
-    """Base exception for graph orchestration (Planner / Executor / Reflector)."""
+    """图编排（Planner / Executor / Reflector）异常的基类。"""
 
 
 class PlanningError(GraphOrchestrationError):
-    """Planner output could not be parsed into a valid plan — malformed JSON,
-    missing ``steps`` key, or empty step list."""
+    """Planner 输出无法解析为有效计划——JSON 格式错误、缺少 ``steps`` 键或
+    步骤列表为空。"""
 
 
 class ExecutionError(GraphOrchestrationError):
-    """Executor inner subgraph failed — recursion limit exceeded, tool-call
-    pair mismatch, or unhandled runtime error during step execution."""
+    """Executor 内部子图失败——超过递归上限、工具调用配对不一致，或步骤执行
+    期间出现未处理的运行时错误。"""
 
 
 class ReflectionError(GraphOrchestrationError):
-    """Reflector produced a decision outside the valid enum set
-    (``done`` / ``continue`` / ``failed``)."""
+    """Reflector 产生了有效枚举集合
+    （``done`` / ``continue`` / ``failed``）之外的决策。"""
 
 
-# ── Engine lifecycle (llm_engine.py v2 refactor) ─────────────────────────────
+# ── 引擎生命周期（llm_engine.py v2 重构）──────────────────────────────────
 
 
 class EngineNotInitializedError(AgentEngineError):
-    """``get_engine()`` was called before ``initialize_engine()`` completed."""
+    """在 ``initialize_engine()`` 完成之前调用了 ``get_engine()``。"""
 
 
 class EngineAlreadyInitializedError(AgentEngineError):
-    """``initialize_engine()`` was called more than once — the singleton
-    already exists and must not be silently replaced."""
+    """``initialize_engine()`` 被多次调用——单例已经存在，不得静默替换。"""
 
 
 class EngineConfigError(AgentEngineError):
-    """``EngineConfig`` is missing a required field (e.g. ``model_path``)
-    or contains an illegal value."""
+    """``EngineConfig`` 缺少必填字段（例如 ``model_path``）或包含非法值。"""

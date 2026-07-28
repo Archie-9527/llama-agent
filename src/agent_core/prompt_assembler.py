@@ -32,13 +32,13 @@ from agent_core.exceptions import (
 )
 from agent_core.knowledge_scope import TokenCounter, truncate_history
 
-# Forward reference to Capability — imported lazily so tests can mock it.
-# The actual type lives in capability_registry.Capability.
-Capability = Any  # replaced at import time — see _init_capability_type()
+# Capability 前向引用——延迟导入以便测试进行 Mock。
+# 实际类型位于 capability_registry.Capability。
+Capability = Any  # 导入时替换，参见 _init_capability_type()
 
 
 # ---------------------------------------------------------------------------
-# [INTERNAL] Jinja2 environment
+# [内部实现] Jinja2 环境
 # ---------------------------------------------------------------------------
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
@@ -53,17 +53,17 @@ _jinja_env = Environment(
 
 
 def _render_system_prompt(template_name: str, **context: Any) -> SystemMessage:
-    """Render a named Jinja2 template into a ``SystemMessage``.
+    """将指定的 Jinja2 模板渲染为 ``SystemMessage``。
 
-    Args:
-        template_name: Base name of the template (e.g. ``"planning_system.jinja2"``).
-        context: Keyword arguments passed as template variables.
+    参数：
+        template_name：模板基本名称，例如 ``"planning_system.jinja2"``。
+        context：作为模板变量传入的关键字参数。
 
-    Returns:
-        A ``SystemMessage`` with the rendered template text as content.
+    返回：
+        以渲染后的模板文本为内容的 ``SystemMessage``。
 
-    Raises:
-        PromptAssemblyError: If the template file is not found.
+    异常：
+        PromptAssemblyError：找不到模板文件时抛出。
     """
     try:
         template = _jinja_env.get_template(template_name)
@@ -77,18 +77,18 @@ def _render_system_prompt(template_name: str, **context: Any) -> SystemMessage:
 
 
 # ---------------------------------------------------------------------------
-# [INTERNAL] Tool description rendering
+# [内部实现] 工具描述渲染
 # ---------------------------------------------------------------------------
 
 
 def _format_schema_as_text(schema: dict) -> str:
-    """Convert a JSON Schema ``properties`` dict into a concise human-readable string.
+    """将 JSON Schema 的 ``properties`` 字典转换为简洁的人类可读字符串。
 
-    Example::
+    示例::
 
         {"query": {"type": "string", "description": "Search keyword"}}
 
-    becomes: ``"query (string, required): Search keyword"``.
+    转换结果为：``"query (string, required): Search keyword"``。
     """
     properties = schema.get("properties", {})
     required: list[str] = schema.get("required", [])
@@ -103,7 +103,7 @@ def _format_schema_as_text(schema: dict) -> str:
 
 
 def _render_tools_section(tools: list[Capability]) -> str:
-    """Render a capability list as human-readable text for the system prompt."""
+    """将能力列表渲染为 System Prompt 使用的人类可读文本。"""
     lines: list[str] = []
     for tool in tools:
         lines.append(f"- **{tool.name}**: {tool.description}")
@@ -119,7 +119,7 @@ def _lifecycle_context_message(
     *,
     phase: str,
 ) -> HumanMessage | None:
-    """Build the R2 context projection without changing R0/R1 prompts."""
+    """构建 R2 上下文投影，同时保持 R0/R1 Prompt 不变。"""
     from agent_core.memory import get_lifecycle_context_manager
 
     view = get_lifecycle_context_manager().prepare(
@@ -159,14 +159,12 @@ def _project_execution_log(
     token_budget: int,
     max_result_chars: int = 4096,
 ) -> list[dict]:
-    """Build a bounded, evidence-preserving view for model-facing prompts.
+    """为面向模型的 Prompt 构建有界且保留证据的视图。
 
-    Full records remain in AgentState/checkpoints/telemetry.  Planner,
-    Reflector and Finalizer receive this projection so one large tool payload
-    cannot consume their entire protected SystemMessage.  ``max_result_chars``
-    also gives evidence-synthesis phases a representation-independent
-    per-record ceiling: an R2 summary must not receive a larger prompt budget
-    merely because it is already shorter than the corresponding R0/R1 record.
+    完整记录仍保存在 AgentState、Checkpoint 和遥测中。Planner、Reflector 与
+    Finalizer 接收该投影，避免单个大型工具载荷占满其受保护的 SystemMessage。
+    ``max_result_chars`` 还为证据综合阶段提供与表示方式无关的逐记录上限：
+    R2 摘要不能仅因已比对应 R0/R1 记录更短，就获得更大的 Prompt 预算。
     """
     records = [dict(record) for record in execution_log[-32:]]
     max_chars = max(256, int(max_result_chars))
@@ -199,20 +197,20 @@ def _project_execution_log(
 
 
 # ---------------------------------------------------------------------------
-# [INTERNAL] History construction — AgentState → BaseMessage
+# [内部实现] 历史构建——AgentState → BaseMessage
 # ---------------------------------------------------------------------------
 
 
 def _build_history_messages(execution_log: list[dict]) -> list[BaseMessage]:
-    """Convert ``AgentState.execution_log`` into a ``BaseMessage`` sequence.
+    """将 ``AgentState.execution_log`` 转换为 ``BaseMessage`` 序列。
 
-    Mapping rules (per design doc §5):
+    映射规则（依据设计文档第 5 节）：
 
     +------------------------------+--------------------------------------------------+
-    | Log entry                    | Produces                                         |
+    | 日志条目                     | 生成内容                                         |
     +==============================+==================================================+
     | ``step`` (description)       | ``HumanMessage(step)`` — placed                   |
-    |                              | **before** the corresponding assistant/tool msgs  |
+    |                              | 位于对应助手/工具消息**之前**                     |
     +------------------------------+--------------------------------------------------+
     | ``tool_used is not None``    | ``AIMessage(tool_calls=[…])`` +                   |
     |                              | ``ToolMessage(result, tool_call_id=…)``           |
@@ -251,22 +249,22 @@ def _build_history_messages(execution_log: list[dict]) -> list[BaseMessage]:
 
 
 # ---------------------------------------------------------------------------
-# [INTERNAL] Structural validation
+# [内部实现] 结构校验
 # ---------------------------------------------------------------------------
 
 
 def _validate_message_sequence(messages: list[BaseMessage]) -> None:
-    """Validate structural invariants on the assembled message list.
+    """校验已组装消息列表的结构不变量。
 
-    Every check that fails raises ``PromptAssemblyError`` with an
-    index-precise error message so the operator can locate the problem.
+    任一检查失败都会抛出 ``PromptAssemblyError``，错误消息会给出精确索引，
+    便于操作人员定位问题。
     """
     if not messages:
         raise PromptAssemblyError(
             "Message list is empty — at least a SystemMessage is required."
         )
 
-    # 1. First message must be SystemMessage
+    # 1. 第一条消息必须是 SystemMessage
     if not isinstance(messages[0], SystemMessage):
         raise PromptAssemblyError(
             f"Message #0 must be SystemMessage, got {type(messages[0]).__name__}"
@@ -275,7 +273,7 @@ def _validate_message_sequence(messages: list[BaseMessage]) -> None:
     for idx, msg in enumerate(messages):
         msg_type = type(msg).__name__
 
-        # 2. No empty-content messages (except AIMessage with tool_calls)
+        # 2. 不允许空内容消息，带 tool_calls 的 AIMessage 除外
         if isinstance(msg, (HumanMessage, SystemMessage, ToolMessage)):
             content = msg.content
             if isinstance(content, str) and content.strip() == "":
@@ -295,7 +293,7 @@ def _validate_message_sequence(messages: list[BaseMessage]) -> None:
                     f"Message #{idx} (AIMessage) has empty content and no tool_calls."
                 )
 
-        # 3. ToolMessage must be preceded by matching AIMessage(tool_calls)
+        # 3. ToolMessage 之前必须有匹配的 AIMessage(tool_calls)
         if isinstance(msg, ToolMessage):
             if idx == 0:
                 raise PromptAssemblyError(
@@ -321,7 +319,7 @@ def _validate_message_sequence(messages: list[BaseMessage]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# [STABLE] Public entry-points
+# [稳定接口] 公共入口
 # ---------------------------------------------------------------------------
 
 
@@ -330,22 +328,22 @@ def assemble_planning_prompt(
     engine: TokenCounter,
     reserved_for_generation: int = 512,
 ) -> list[BaseMessage]:
-    """Assemble the message list for the **Planner** node.
+    """为 **Planner** 节点组装消息列表。
 
-    Contents:
-      * **SystemMessage** — planner role + task goal + available tools.
-      * **HumanMessage** — reflection notes from the previous iteration
-        (if any), prefixed so they do not collide with user input.
+    内容：
+      * **SystemMessage**——Planner 角色 + 任务目标 + 可用工具。
+      * **HumanMessage**——上一轮迭代的反思记录（如有），添加前缀以避免与用户
+        输入混淆。
 
-    Args:
-        state: ``AgentState``-shaped dict (see ``graph/state.py``).
-        engine: Token counter (``ChatLlamaCpp`` or stub).
-        reserved_for_generation: Tokens reserved for the model's response.
+    参数：
+        state：形状符合 ``AgentState`` 的字典，参见 ``graph/state.py``。
+        engine：Token 计数器，可以是 ``ChatLlamaCpp`` 或 Stub。
+        reserved_for_generation：为模型回答预留的 Token 数。
 
-    Returns:
-        A structurally valid, budget-compliant message list.
+    返回：
+        结构有效且符合预算的消息列表。
     """
-    from agent_core.capability_registry import list_capabilities  # deferred import
+    from agent_core.capability_registry import list_capabilities  # 延迟导入
 
     tools = list_capabilities()
     tools_section = _render_tools_section(tools) if tools else ""
@@ -378,7 +376,7 @@ def assemble_planning_prompt(
     if lifecycle_message is not None:
         messages.append(lifecycle_message)
 
-    # Append reflection notes from previous cycle (if any)
+    # 追加上一循环的反思记录（如有）
     if reflection_notes:
         notes_text = "以下是上一轮的评估反馈：\n" + "\n".join(
             f"- {note}" for note in reflection_notes
@@ -387,7 +385,7 @@ def assemble_planning_prompt(
 
     _validate_message_sequence(messages)
 
-    # Budget management
+    # 预算管理
     n_ctx = _context_window(state, engine)
     budget = n_ctx - reserved_for_generation
     messages = _apply_budget(messages, budget, engine)
@@ -402,24 +400,24 @@ def assemble_execution_prompt(
     reserved_for_generation: int = 512,
     available_tools: Optional[list[Capability]] = None,
 ) -> list[BaseMessage]:
-    """Assemble the message list for the **Executor** node.
+    """为 **Executor** 节点组装消息列表。
 
-    Contents:
-      * **SystemMessage** — executor role + current step instruction + tools.
-      * **History**: ``HumanMessage(step)`` → ``AIMessage(…/tool_calls)`` →
-        ``ToolMessage(result)`` for each logged step.
-      * (Optional) latest tool result appended as a ``ToolMessage``.
+    内容：
+      * **SystemMessage**——Executor 角色 + 当前步骤指令 + 工具。
+      * **历史**：每个已记录步骤依次转换为 ``HumanMessage(step)`` →
+        ``AIMessage(…/tool_calls)`` → ``ToolMessage(result)``。
+      * 可选：将最新工具结果作为 ``ToolMessage`` 追加。
 
-    Args:
-        state: ``AgentState``-shaped dict.
-        engine: Token counter.
-        tool_result: Result from the most recent tool call, if any.
-        reserved_for_generation: Tokens reserved for generation.
-        available_tools: Explicit tools for this step. ``None`` uses every
-            registered tool; an empty list produces a tool-free prompt.
+    参数：
+        state：形状符合 ``AgentState`` 的字典。
+        engine：Token 计数器。
+        tool_result：最近一次工具调用的结果（如有）。
+        reserved_for_generation：为生成预留的 Token 数。
+        available_tools：当前步骤明确可用的工具。``None`` 表示使用所有已注册
+            工具；空列表生成不带工具的 Prompt。
 
-    Returns:
-        A structurally valid, budget-compliant message list.
+    返回：
+        结构有效且符合预算的消息列表。
     """
     from agent_core.capability_registry import list_capabilities
 
@@ -449,10 +447,9 @@ def assemble_execution_prompt(
     )
     history_msgs = _build_history_messages(execution_log)
 
-    # Always end the initial input with the current step as a HumanMessage.
-    # Besides making the instruction explicit, this lets the ReAct middleware
-    # distinguish an old ToolMessage in history from a ToolMessage produced
-    # during the current inner loop.
+    # 初始输入始终以表示当前步骤的 HumanMessage 结束。这样既能明确指令，也能让
+    # ReAct Middleware 区分历史中的旧 ToolMessage 与当前内部循环产生的
+    # 工具消息。
     lifecycle_message = _lifecycle_context_message(
         state, engine, phase="executor"
     )
@@ -466,9 +463,9 @@ def assemble_execution_prompt(
         ]
     )
 
-    # Append optional latest tool result
+    # 追加可选的最新工具结果
     if tool_result is not None:
-        # Ensure the tool result is paired with a preceding AIMessage(tool_calls)
+        # 确保工具结果与之前的 AIMessage(tool_calls) 配对
         call_id = state.get("_last_tool_call_id", "unknown")
         last = raw[-1] if raw else None
         if (
@@ -478,7 +475,7 @@ def assemble_execution_prompt(
         ):
             raw.append(ToolMessage(content=tool_result, tool_call_id=call_id))
         else:
-            # Synthesize a matching AIMessage(tool_calls) before the result
+            # 在结果之前合成匹配的 AIMessage(tool_calls)
             raw.append(
                 AIMessage(
                     content="",
@@ -501,19 +498,19 @@ def assemble_reflection_prompt(
     engine: TokenCounter,
     reserved_for_generation: int = 512,
 ) -> list[BaseMessage]:
-    """Assemble the message list for the **Reflector** node.
+    """为 **Reflector** 节点组装消息列表。
 
-    Contents:
-      * **SystemMessage** — evaluator role + task goal + execution log summary.
-      * No tool descriptions — the reflector never calls tools.
+    内容：
+      * **SystemMessage**——评估者角色 + 任务目标 + 执行日志摘要。
+      * 不包含工具描述——Reflector 永远不会调用工具。
 
-    Args:
-        state: ``AgentState``-shaped dict.
-        engine: Token counter.
-        reserved_for_generation: Tokens reserved for generation.
+    参数：
+        state：形状符合 ``AgentState`` 的字典。
+        engine：Token 计数器。
+        reserved_for_generation：为生成预留的 Token 数。
 
-    Returns:
-        A structurally valid, budget-compliant message list.
+    返回：
+        结构有效且符合预算的消息列表。
     """
     task_goal = state.get("task_goal", "")
     plan_steps: list[str] = state.get("plan_steps", [])
@@ -549,7 +546,7 @@ def assemble_finalization_prompt(
     engine: TokenCounter,
     reserved_for_generation: int = 512,
 ) -> list[BaseMessage]:
-    """Build a tool-free prompt that synthesizes the whole task result."""
+    """构建不带工具、用于综合整个任务结果的 Prompt。"""
     projected = _project_execution_log(
         state.get("execution_log", []),
         engine,
@@ -581,7 +578,7 @@ def assemble_finalization_prompt(
 
 
 # ---------------------------------------------------------------------------
-# [INTERNAL] Budget helper
+# [内部实现] 预算辅助函数
 # ---------------------------------------------------------------------------
 
 
@@ -590,22 +587,21 @@ def _apply_budget(
     budget: int,
     engine: TokenCounter,
 ) -> list[BaseMessage]:
-    """Apply token-budget trimming and re-validate."""
+    """应用 Token 预算裁剪并重新校验。"""
     try:
         trimmed = truncate_history(messages, max_tokens=budget, engine=engine)
     except ContextBudgetExceededError:
-        raise  # already the right type
+        raise  # 已经是正确类型
     _validate_message_sequence(trimmed)
     return trimmed
 
 
 def _context_window(state: dict, engine: TokenCounter) -> int:
-    """Resolve the real context window used by the inference engine.
+    """解析推理引擎实际使用的上下文窗口。
 
-    Older checkpoints may carry an explicit ``n_ctx`` field, so preserve it
-    when present.  Normal AgentState does not contain that field; in that
-    case use the engine configuration instead of silently falling back to a
-    hard-coded 4096-token window.
+    旧 Checkpoint 可能带有显式 ``n_ctx`` 字段，存在时应保留。普通 AgentState
+    不包含该字段，此时应使用引擎配置，而不是静默回退到硬编码的 4096 Token
+    窗口。
     """
     state_n_ctx = state.get("n_ctx")
     if state_n_ctx is not None:

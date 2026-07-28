@@ -1,4 +1,4 @@
-"""Process-local access to the configured ArtifactStore."""
+"""访问当前进程所配置的 ArtifactStore。"""
 
 from __future__ import annotations
 

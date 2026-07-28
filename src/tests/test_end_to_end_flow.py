@@ -1,4 +1,4 @@
-# tests/integration/test_end_to_end_flow.py
+# 文件：tests/integration/test_end_to_end_flow.py
 
 """
 工作流编排层端到端集成测试。
@@ -81,7 +81,7 @@ class FakeReactAgent:
 
 
 # ---------------------------------------------------------------------------
-# Fixtures
+# 测试夹具
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
@@ -196,20 +196,18 @@ def test_resume_after_executor_crash(tmp_config, patched_env, monkeypatch):
 
     runner = TaskRunner(tmp_config)
 
-    # V3 build_graph wraps nodes with _with_error_isolation, so the
-    # RuntimeError is caught, converted to status="failed", and the
-    # task completes gracefully instead of raising.
+    # V3 的 build_graph 使用 _with_error_isolation 包装节点，因此会捕获
+    # RuntimeError 并将状态转换为 status="failed"，任务会正常结束而非抛出异常。
     tid, result = runner.start_new_task("会中断一次的任务")
     assert result["status"] == "failed"
 
-    # Resume: the executor will re-run the step.  The first run failed
-    # on the first step, so after resume, the re-run should succeed
-    # (call_state["count"] is now 2, so flaky_invoke returns normally).
+    # 恢复后执行器会重新运行该步骤。首次运行在第一步失败，因此恢复后的
+    # 再次运行应当成功（此时 call_state["count"] 为 2，
+    # flaky_invoke 会正常返回）。
     result = runner.resume_task(str(fixed_id))
 
-    # After resume with error isolation, the task may still be failed
-    # because the checkpoint happened after normalize_state.  The
-    # second invoke replays from the start.  Verify it survives.
+    # 在错误隔离机制下恢复后，任务仍可能为 failed，因为检查点位于
+    # normalize_state 之后。第二次调用会从头重放，这里验证它不会崩溃。
     assert result["status"] in ("done", "failed", "executing")
 
     runner.close()

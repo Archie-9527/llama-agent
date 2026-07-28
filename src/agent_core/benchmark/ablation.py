@@ -1,4 +1,4 @@
-"""One-command sequential R0/R1/R2 ablation runner."""
+"""一条命令顺序执行 R0/R1/R2 的消融 Runner。"""
 
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ def run_r0_r2_ablation(
     round_order: tuple[str, ...] = ("R0", "R1", "R2"),
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> AblationResult:
-    """Run the same suite sequentially under R0, R1 and R2 policies."""
+    """在 R0、R1 和 R2 策略下顺序运行同一个 Suite。"""
     if len(round_order) != 3 or set(round_order) != set(ROUND_MEMORY_OVERRIDES):
         raise ValueError(
             "round_order must contain R0, R1 and R2 exactly once"
@@ -154,7 +154,7 @@ def run_r0_r2_ablation(
 
 
 def console_progress(event: dict[str, Any]) -> None:
-    """Human-readable progress suitable for long local-model runs."""
+    """适合长时间本地模型任务的人类可读进度。"""
     kind = event.get("event")
     if kind == "ablation_round_started":
         print(f"\n[{event['round']}] 开始运行", flush=True)

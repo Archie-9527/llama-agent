@@ -1,13 +1,11 @@
-"""Executor node — run the current plan step inside the ReAct inner subgraph.
+"""Executor 节点——在 ReAct 内部子图中运行当前计划步骤。
 
-The executor bridges two state schemas:
-    * **Outer** ``AgentState`` — business-level fields (plan_steps,
-      execution_log, …).
-    * **Inner** ``{"messages": [...]}`` — the message-driven state that
-      the ReAct subgraph expects.
+Executor 连接两种状态 Schema：
+    * **外层** ``AgentState``——业务级字段，例如 plan_steps、execution_log。
+    * **内层** ``{"messages": [...]}``——ReAct 子图所需的消息驱动状态。
 
-All bridging logic is encapsulated here so that ``planner_node`` and
-``reflector_node`` never need to know the inner subgraph exists.
+所有桥接逻辑都封装在本文件中，因此 ``planner_node`` 和 ``reflector_node`` 无需
+知道内部子图的存在。
 """
 
 from __future__ import annotations
@@ -28,7 +26,7 @@ if TYPE_CHECKING:
 
 
 # ---------------------------------------------------------------------------
-# [INTERNAL] State bridging — outer AgentState ↔ inner {"messages": [...]}
+# [内部实现] 状态桥接——外层 AgentState ↔ 内层 {"messages": [...]}
 # ---------------------------------------------------------------------------
 
 
@@ -37,11 +35,10 @@ def _build_react_input(
     *,
     tools: list | None = None,
 ) -> dict:
-    """Translate outer ``AgentState`` into the inner subgraph's input format.
+    """将外层 ``AgentState`` 转换为内部子图的输入格式。
 
-    Calls ``assemble_execution_prompt`` to produce a fully assembled,
-    budget-compliant, structurally valid message list, then wraps it
-    in the ``{"messages": [...]}`` dict that the inner subgraph expects.
+    调用 ``assemble_execution_prompt`` 生成完整组装、符合预算且结构有效的
+    消息列表，再包装为内部子图需要的 ``{"messages": [...]}`` 字典。
     """
     engine = get_engine()
     messages = assemble_execution_prompt(
@@ -53,13 +50,12 @@ def _build_react_input(
 
 
 def _required_tool_names_for_step(current_step: str) -> tuple[str, ...]:
-    """Return the tool explicitly targeted by one atomic plan step.
+    """返回一个原子计划步骤明确指定的工具。
 
-    The planner contract requires every tool-using step to name its tool and
-    to keep steps atomic.  A tool name mentioned only as prior evidence (for
-    example, ``line_number 为 search_log 返回的行号``) must not become another
-    required call.  Prefer an imperative ``使用/调用/use/call <tool>`` target;
-    as a compatibility fallback, accept a tool name at the start of a step.
+    Planner 契约要求每个使用工具的步骤都给出工具名称并保持原子性。仅作为既有
+    证据提到的工具名，例如“``line_number 为 search_log 返回的行号``”，不能
+    变成另一次必需调用。优先识别命令式的“使用/调用/use/call <tool>”目标；
+    为兼容旧格式，也接受步骤开头的工具名称。
     """
     from agent_core.capability_registry import list_capabilities
 
@@ -91,7 +87,7 @@ def _required_tool_names_for_step(current_step: str) -> tuple[str, ...]:
 
 
 def _is_tool_free_conversation_step(current_step: str) -> bool:
-    """Return true when the atomic plan step declares no target tool."""
+    """原子计划步骤未声明目标工具时返回真。"""
     return not _required_tool_names_for_step(current_step)
 
 
@@ -99,7 +95,7 @@ def _run_tool_free_step(
     state: "AgentState",
     current_step: str,
 ) -> list[dict]:
-    """Execute a known conversation-only step without binding any tools."""
+    """不绑定任何工具，执行已确认的纯会话步骤。"""
     messages = _build_react_input(state, tools=[])["messages"]
     response = get_engine().invoke(messages)
     content = str(response.content or "").strip()
@@ -118,22 +114,20 @@ def _run_tool_free_step(
 
 
 def _normalize_output_messages(raw_messages: list) -> list[BaseMessage]:
-    """Defensively normalise the inner subgraph's output.
+    """以防御方式规范化内部子图输出。
 
-    Some LangGraph paths return plain ``dict`` entries inside the
-    ``messages`` list (especially when a node uses ``add_messages``
-    with dict-style returns).  This function converts everything to
-    proper ``BaseMessage`` subclasses so downstream extraction code
-    never has to guess the format.
+    某些 LangGraph 路径会在 ``messages`` 列表中返回普通 ``dict``，尤其是节点
+    使用 ``add_messages`` 并返回字典时。本函数将所有内容转换为正确的
+    ``BaseMessage`` 子类，使下游提取代码无需猜测格式。
 
-    Args:
-        raw_messages: The raw ``react_output["messages"]`` list —
-            may contain ``dict``, ``BaseMessage``, or a mix.
+    参数：
+        raw_messages：原始 ``react_output["messages"]`` 列表，可能包含
+            ``dict``、``BaseMessage`` 或二者混合。
 
-    Returns:
-        A list where every entry is a ``BaseMessage`` subclass.
+    返回：
+        每一项都是 ``BaseMessage`` 子类的列表。
     """
-    # convert_to_messages handles mixed lists of dict / BaseMessage
+        # convert_to_messages 能处理 dict 与 BaseMessage 混合列表
     return list(convert_to_messages(raw_messages))
 
 
@@ -141,25 +135,23 @@ def _extract_execution_result(
     messages: list[BaseMessage],
     current_step: str,
 ) -> list[dict]:
-    """Parse the inner subgraph's message list back into execution log records.
+    """将内部子图消息列表解析回执行日志记录。
 
-    Walk through the normalised message list and pair each
-    ``AIMessage(tool_calls=…)`` with its following ``ToolMessage``(s).
-    The final non-tool-call ``AIMessage`` (the step's conclusion) also
-    produces a record.
+    遍历规范化后的消息列表，把每个 ``AIMessage(tool_calls=…)`` 与其后的一个或
+    多个 ``ToolMessage`` 配对。最后一个不含工具调用的 ``AIMessage``（步骤
+    结论）也会生成记录。
 
-    Args:
-        messages: Normalised message list from ``_normalize_output_messages``.
-        current_step: The text of the current plan step (for the ``step`` field).
+    参数：
+        messages：来自 ``_normalize_output_messages`` 的规范化消息列表。
+        current_step：当前计划步骤文本，用于 ``step`` 字段。
 
-    Returns:
-        A list of execution-log dicts matching ``AgentState.execution_log``
-        schema: ``{"step": str, "result": str, "tool_used": str | None}``.
+    返回：
+        符合 ``AgentState.execution_log`` Schema 的执行日志字典列表：
+        ``{"step": str, "result": str, "tool_used": str | None}``。
 
-    Raises:
-        ExecutionError: If an ``AIMessage(tool_calls=…)`` references a
-            ``tool_call_id`` that has no matching ``ToolMessage`` in the
-            remaining messages.
+    异常：
+        ExecutionError：``AIMessage(tool_calls=…)`` 引用的 ``tool_call_id``
+            在后续消息中没有匹配的 ``ToolMessage`` 时抛出。
     """
 
     records: list[dict] = []
@@ -169,7 +161,7 @@ def _extract_execution_result(
 
         if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
             for call in msg.tool_calls:
-                # Find the matching ToolMessage in the remaining messages
+            # 在剩余消息中查找匹配的 ToolMessage
                 matching_tool_msg: ToolMessage | None = None
                 for j in range(i + 1, len(messages)):
                     candidate = messages[j]
@@ -196,7 +188,7 @@ def _extract_execution_result(
                     }
                 )
         elif isinstance(msg, AIMessage) and not getattr(msg, "tool_calls", None):
-            # This is a plain-text response — the step's final conclusion
+            # 这是纯文本回答——当前步骤的最终结论
             if msg.content:
                 records.append(
                     {
@@ -216,13 +208,12 @@ def _validate_required_tool_execution(
     records: list[dict],
     required_tool_names: tuple[str, ...] | None = None,
 ) -> None:
-    """Reject textual tool imitations that were never actually executed.
+    """拒绝从未真实执行的文本工具调用仿制品。
 
-    A real tool execution always produces a ToolMessage and therefore a log
-    record with ``tool_used`` set.  Small local models sometimes understand
-    that a tool is needed but print ``tool_name(...)`` or a JSON snippet in a
-    plain AIMessage instead.  Treating that as success is unsafe and causes
-    fabricated tool results in later planning/reflection rounds.
+    真实工具执行一定会产生 ToolMessage，进而生成设置了 ``tool_used`` 的日志
+    记录。小型本地模型有时知道需要工具，却只在普通 AIMessage 中打印
+    ``tool_name(...)`` 或 JSON 片段。将其视为成功并不安全，会导致后续规划和
+    反思轮次使用虚构的工具结果。
     """
     from agent_core.capability_registry import list_capabilities
 
@@ -283,7 +274,7 @@ def _validate_required_tool_execution(
 
 
 def _is_natural_language_summary(content: str) -> bool:
-    """Return False for empty or leaked llama.cpp function protocol markers."""
+    """对于空文本或泄漏的 llama.cpp 函数协议标记返回 False。"""
     stripped = content.strip()
     if not stripped:
         return False
@@ -294,7 +285,7 @@ def _recover_empty_response(
     messages: list[BaseMessage],
     current_step: str,
 ) -> list[dict]:
-    """Retry once without tools when the inner agent returned no visible output."""
+    """内部 Agent 没有返回可见输出时，不带工具重试一次。"""
     response = get_engine().invoke(
         [
             *messages,
@@ -318,11 +309,11 @@ def _ensure_tool_summary(
     current_step: str,
     records: list[dict],
 ) -> list[dict]:
-    """Retry one tool-free model call when the inner agent omitted its summary."""
+    """内部 Agent 遗漏摘要时，不带工具重试一次模型调用。"""
     has_tool_result = any(record.get("tool_used") for record in records)
     if has_tool_result:
-        # Protocol-only text is an internal formatting leak, not a user-facing
-        # conclusion.  Drop it before deciding whether recovery is needed.
+    # 仅包含协议的文本属于内部格式泄漏，不是面向用户的结论。判断是否需要恢复
+    # 之前先将其丢弃。
         records = [
             record
             for record in records
@@ -362,27 +353,25 @@ def _ensure_tool_summary(
 
 
 # ---------------------------------------------------------------------------
-# [STABLE] executor_node
+# [稳定接口] executor_node
 # ---------------------------------------------------------------------------
 
 
 def executor_node(state: "AgentState", config: RunnableConfig) -> "AgentState":
-    """Execute the current plan step via the ReAct inner subgraph.
+    """通过 ReAct 内部子图执行当前计划步骤。
 
-    1. Look up the current step from ``plan_steps[current_step_index]``.
-    2. Build the inner subgraph input messages via ``_build_react_input``.
-    3. Invoke the cached inner subgraph with a ``recursion_limit`` safety cap.
-    4. Parse the output messages into ``execution_log`` records.
-    5. Advance ``current_step_index`` and, if all steps are done,
-       transition ``status`` to ``"reflecting"``.
+    1. 从 ``plan_steps[current_step_index]`` 取得当前步骤。
+    2. 通过 ``_build_react_input`` 构建内部子图输入消息。
+    3. 在 ``recursion_limit`` 安全上限下调用已缓存的内部子图。
+    4. 将输出消息解析为 ``execution_log`` 记录。
+    5. 推进 ``current_step_index``；全部步骤完成后，将 ``status`` 转换为
+       ``"reflecting"``。
 
-    Returns:
-        *state* mutated with new execution log entries and an updated
-        step index.
+    返回：
+        添加新执行日志并更新步骤索引后的 *state*。
 
-    Raises:
-        ExecutionError: If the inner subgraph exceeds the recursion
-            limit, or if the output messages are malformed.
+    异常：
+        ExecutionError：内部子图超过递归上限或输出消息格式错误时抛出。
     """
     plan_steps: list[str] = state.get("plan_steps", [])
     current_step_index: int = state.get("current_step_index", 0)
@@ -417,9 +406,8 @@ def executor_node(state: "AgentState", config: RunnableConfig) -> "AgentState":
 
     step_tools = [get_capability(name) for name in required_tool_names]
 
-    # Expose only the current atomic step's target tool.  This both reduces
-    # prompt/schema overhead and prevents a small local model from selecting a
-    # semantically related but incorrect capability.
+    # 只公开当前原子步骤的目标工具。这样既能减少 Prompt/Schema 开销，也能防止
+    # 小型本地模型选择语义相关但不正确的能力。
     react_input = _build_react_input(state, tools=step_tools)
 
     # 记录输入消息的数量，以便我们稍后可以仅隔离由内部代理新生成的消息。
@@ -427,12 +415,12 @@ def executor_node(state: "AgentState", config: RunnableConfig) -> "AgentState":
     # 我们不能重新从已经在先前步骤中记录的历史消息中提取记录。
     input_message_count = len(react_input["messages"])
 
-    # Get the cached inner agent
+    # 获取已缓存的内部 Agent
     from agent_core.graph.react_agent_factory import initialize_react_agent
 
     agent = initialize_react_agent(required_tool_names)
 
-    # Run the inner loop with a recursion-limit safety cap
+    # 在递归安全上限下运行内部循环
     try:
         react_output = agent.invoke(react_input, config=sub_config)
     except Exception as exc:
@@ -474,7 +462,7 @@ def executor_node(state: "AgentState", config: RunnableConfig) -> "AgentState":
     state["execution_log"].extend(new_records)
     state["current_step_index"] += 1
 
-    # If all steps are done, transition to reflecting
+    # 所有步骤完成后转换到反思阶段
     if state["current_step_index"] >= len(plan_steps):
         state["status"] = "reflecting"
 

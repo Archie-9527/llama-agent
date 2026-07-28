@@ -1,13 +1,13 @@
-"""Tests for capability_registry.py.
+"""capability_registry.py 测试。
 
-Covers:
-  - @register decorator creates Capability entries.
-  - get_capability() lookup by name.
-  - list_capabilities() returns snapshot.
-  - Duplicate registration raises ValueError.
-  - KeyError on missing capability.
-  - clear_registry() for test isolation.
-  - Capability dataclass immutability.
+覆盖范围：
+  - @register 装饰器创建 Capability 条目。
+  - get_capability() 按名称查找。
+  - list_capabilities() 返回快照。
+  - 重复注册抛出 ValueError。
+  - 能力缺失时抛出 KeyError。
+  - 使用 clear_registry() 隔离测试。
+  - Capability DataClass 的不可变性。
 """
 
 from __future__ import annotations
@@ -32,14 +32,14 @@ from agent_core.capability_registry import (
 
 @pytest.fixture(autouse=True)
 def _reset_registry():
-    """Clear the registry before and after each test."""
+    """在每个测试前后清空注册表。"""
     clear_registry()
     yield
     clear_registry()
 
 
 class TestRegister:
-    """Decorator-based registration."""
+    """测试基于装饰器的注册。"""
 
     def test_register_creates_capability(self):
         @register(
@@ -58,7 +58,7 @@ class TestRegister:
         assert cap.name == "test_tool"
         assert cap.description == "A test tool"
         assert cap.input_schema["required"] == ["x"]
-        assert cap.handler(5) == 10  # handler is the original function
+        assert cap.handler(5) == 10  # Handler 就是原始函数
 
     def test_duplicate_name_raises(self):
         @register(
@@ -93,7 +93,7 @@ class TestRegister:
 
 
 class TestGetCapability:
-    """Lookup by name."""
+    """测试按名称查找。"""
 
     def test_get_existing(self):
         @register(name="find_me", description="x", input_schema={})
@@ -109,7 +109,7 @@ class TestGetCapability:
 
 
 class TestListCapabilities:
-    """Snapshot semantics."""
+    """测试快照语义。"""
 
     def test_list_empty(self):
         assert list_capabilities() == []
@@ -119,7 +119,7 @@ class TestListCapabilities:
         def t1() -> None: ...
 
         caps = list_capabilities()
-        caps.clear()  # should NOT affect the real registry
+        caps.clear()  # 不应影响真实注册表
         assert len(list_capabilities()) == 1
 
     def test_list_includes_all_registered(self):
@@ -134,7 +134,7 @@ class TestListCapabilities:
 
 
 class TestCapabilityDataclass:
-    """Immutability."""
+    """测试不可变性。"""
 
     def test_frozen(self):
         cap = Capability(

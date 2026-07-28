@@ -1,4 +1,4 @@
-"""Thread-safe append-only files used as benchmark raw data."""
+"""用作 Benchmark 原始数据的线程安全追加写文件。"""
 
 from __future__ import annotations
 

@@ -1,14 +1,13 @@
-"""Application service layer — bridges the graph orchestration layer to CLI/API consumers.
+"""应用服务层——连接图编排层与 CLI/API 调用方。
 
-``session.py`` is the single place that holds a compiled graph and a
-checkpointer connection, manages ``thread_id`` lifecycle, constructs
-initial ``AgentState``, and normalises all exceptions so that callers
-(``cli.py``, web handlers) only deal with ``AgentCoreError``.
+``session.py`` 是唯一持有已编译图和 Checkpointer 连接、管理 ``thread_id``
+生命周期、构造初始 ``AgentState`` 并规范化所有异常的位置，使调用方
+（``cli.py``、Web Handler）只需处理 ``AgentCoreError``。
 
-Public API:
-    * ``RunConfig`` — immutable-ish configuration dataclass.
-    * ``TaskRunner`` — start new tasks, resume interrupted ones,
-      remember the last ``thread_id``, and release resources cleanly.
+公共 API：
+    * ``RunConfig``——近似不可变的配置 DataClass。
+    * ``TaskRunner``——启动新任务、恢复中断任务、记住最近的 ``thread_id``，
+      并正确释放资源。
 """
 
 from __future__ import annotations
@@ -28,22 +27,20 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# [STABLE] RunConfig — single place for all tunables
+# [稳定接口] RunConfig——所有可调参数的统一位置
 # ---------------------------------------------------------------------------
 
 
 @dataclass
 class RunConfig:
-    """All tuneable parameters for a ``TaskRunner`` instance.
+    """``TaskRunner`` 实例的所有可调参数。
 
-    New knobs should be added here with a sensible default so existing
-    callers are not affected.
+    新参数应在此添加并提供合理默认值，避免影响现有调用方。
 
-    Attributes:
-        max_iterations: Safety cap on plan→reflect loops (default 6).
-        db_path: Where the SQLite checkpoint database lives.
-        last_thread_file: Tiny file that remembers the most recent
-            ``thread_id`` for parameter-less resume.
+    属性：
+        max_iterations：计划→反思循环的安全上限，默认为 6。
+        db_path：SQLite Checkpoint 数据库所在位置。
+        last_thread_file：记录最近 ``thread_id`` 的小文件，用于无参数恢复。
     """
 
     max_iterations: int = 6
@@ -54,25 +51,25 @@ class RunConfig:
 
 
 # ---------------------------------------------------------------------------
-# [STABLE] TaskRunner — the application-level task executor
+# [稳定接口] TaskRunner——应用层任务执行器
 # ---------------------------------------------------------------------------
 
 
 class TaskRunner:
-    """Holds a compiled LangGraph graph + checkpoint connection and exposes
-    a simple start / resume / close interface.
+    """持有已编译的 LangGraph 图和 Checkpoint 连接，并提供简单的启动、恢复与
+    关闭接口。
 
-    Typical usage::
+    典型用法::
 
         runner = TaskRunner()
         tid, result = runner.start_new_task("Summarise the meeting notes.")
         runner.close()
 
-        # Or as a context manager:
+        # 也可以用作上下文管理器：
         with TaskRunner() as runner:
             tid, result = runner.start_new_task("Query tomorrow's weather")
 
-        # Resume a crashed task:
+        # 恢复崩溃的任务：
         with TaskRunner() as runner:
             result = runner.resume_task(tid)
     """
@@ -85,25 +82,23 @@ class TaskRunner:
         logger.info("TaskRunner initialised  db_path=%s", self.config.db_path)
 
     # ------------------------------------------------------------------
-    # Resource initialisation
+    # 资源初始化
     # ------------------------------------------------------------------
 
     def _init_checkpointer(self):
-        """Defensively initialise the ``SqliteSaver``.
+        """以防御方式初始化 ``SqliteSaver``。
 
-        ``get_checkpointer`` is a ``@contextmanager`` that yields a
-        saver.  We use ``ExitStack.enter_context`` so that the saver's
-        cleanup is guaranteed regardless of which path we take, and so
-        that ``close()`` can release everything in one call.
+        ``get_checkpointer`` 是生成 Saver 的 ``@contextmanager``。这里使用
+        ``ExitStack.enter_context``，以保证无论执行哪条路径都能清理 Saver，
+        并让 ``close()`` 可以一次释放所有资源。
         """
         cm = get_checkpointer(self.config.db_path)
         return self._exit_stack.enter_context(cm)
 
     def close(self) -> None:
-        """Release all underlying resources (DB connection, etc.).
+        """释放所有底层资源，例如数据库连接。
 
-        Safe to call multiple times — ``ExitStack`` is idempotent after
-        the first close.
+        可以安全地多次调用；``ExitStack`` 在第一次关闭后具有幂等性。
         """
         self._exit_stack.close()
         logger.info("TaskRunner resources released")
@@ -116,7 +111,7 @@ class TaskRunner:
         return False
 
     # ------------------------------------------------------------------
-    # Initial state construction
+    # 初始状态构造
     # ------------------------------------------------------------------
 
     def _build_initial_state(
@@ -127,10 +122,9 @@ class TaskRunner:
         conversation_context: str = "",
         current_user_input: str | None = None,
     ) -> AgentState:
-        """Construct a valid ``AgentState`` from a bare task-goal string.
+        """根据纯任务目标字符串构造有效的 ``AgentState``。
 
-        Every default value is defined here and *only* here — callers
-        never assemble ``AgentState`` dicts by hand.
+        所有默认值都在且仅在此处定义；调用方不应手工组装 ``AgentState`` 字典。
         """
         return AgentState(
             task_goal=task_goal,
@@ -154,7 +148,7 @@ class TaskRunner:
         )
 
     # ------------------------------------------------------------------
-    # [STABLE] Public entry points
+    # [稳定接口] 公共入口
     # ------------------------------------------------------------------
 
     def start_new_task(
@@ -166,18 +160,18 @@ class TaskRunner:
         conversation_context: str = "",
         current_user_input: str | None = None,
     ) -> tuple[str, AgentState]:
-        """Start a brand-new task.
+        """启动全新任务。
 
-        Args:
-            task_goal: A non-empty description of what the agent should do.
+        参数：
+            task_goal：非空的 Agent 任务描述。
 
-        Returns:
-            A ``(thread_id, final_state)`` tuple.  The caller should save
-            ``thread_id`` — it is needed for ``resume_task``.
+        返回：
+            ``(thread_id, final_state)`` 元组。调用方应保存 ``thread_id``，
+            ``resume_task`` 需要使用它。
 
-        Raises:
-            ValueError: If *task_goal* is empty or whitespace-only.
-            AgentCoreError: If any orchestration-layer error occurs.
+        异常：
+            ValueError：*task_goal* 为空或只包含空白时抛出。
+            AgentCoreError：编排层发生任何错误时抛出。
         """
         if not task_goal or not task_goal.strip():
             raise ValueError("task_goal must not be empty")
@@ -209,24 +203,21 @@ class TaskRunner:
         return thread_id, result
 
     def resume_task(self, thread_id: str) -> AgentState:
-        """Resume a task that was interrupted (crash / manual kill).
+        """恢复因崩溃或手动终止而中断的任务。
 
-        **This method deliberately does not accept a ``task_goal``
-        argument.**  LangGraph detects the existing checkpoint for the
-        given ``thread_id`` and resumes from the last completed node —
-        any newly supplied initial state would be silently ignored.
-        Passing it would create a misleading API surface.
+        **本方法有意不接收 ``task_goal`` 参数。** LangGraph 会检测给定
+        ``thread_id`` 已有的 Checkpoint，并从最后完成的节点恢复；任何新提供的
+        初始状态都会被静默忽略，接受该参数会形成误导性的 API。
 
-        Args:
-            thread_id: The identifier returned by a previous
-                ``start_new_task`` call.
+        参数：
+            thread_id：之前调用 ``start_new_task`` 返回的标识符。
 
-        Returns:
-            The final ``AgentState`` after the resumed run completes.
+        返回：
+            恢复运行完成后的最终 ``AgentState``。
 
-        Raises:
-            ValueError: If *thread_id* is empty or ``None``.
-            AgentCoreError: If any orchestration-layer error occurs.
+        异常：
+            ValueError：*thread_id* 为空或为 ``None`` 时抛出。
+            AgentCoreError：编排层发生任何错误时抛出。
         """
         if not thread_id:
             raise ValueError("thread_id must not be empty")
@@ -238,28 +229,26 @@ class TaskRunner:
             return self._invoke(None, thread_id)
 
     # ------------------------------------------------------------------
-    # Internal invoke — single choke-point for graph calls
+    # 内部调用——所有图调用的唯一入口
     # ------------------------------------------------------------------
 
     def _invoke(
         self, state_or_none: AgentState | None, thread_id: str
     ) -> AgentState:
-        """Unified graph-invoke entry point with exception normalisation.
+        """带异常规范化的统一图调用入口。
 
-        Every call to ``self._graph.invoke`` must go through here so
-        that exception handling is applied consistently.  Callers above
-        this layer only need to catch ``AgentCoreError``.
+        每次调用 ``self._graph.invoke`` 都必须经过此处，以统一应用异常处理。
+        本层以上的调用方只需捕获 ``AgentCoreError``。
         """
         config = {"configurable": {"thread_id": thread_id}}
         try:
             return self._graph.invoke(state_or_none, config=config)  # type: ignore[arg-type]
         except AgentCoreError:
-            # Already a semantic exception — re-raise unchanged.
+            # 已经是语义异常，原样重新抛出。
             raise
         except Exception as exc:
-            # Defensive catch-all: any raw exception that slipped through
-            # the graph layer (e.g. an unexpected LangGraph internal error)
-            # gets wrapped so cli.py sees only AgentCoreError.
+            # 防御性兜底：包装所有穿透图层的原始异常，例如意外的 LangGraph 内部
+            # 错误，使 cli.py 只会看到 AgentCoreError。
             logger.exception(
                 "Unexpected error during task execution  thread_id=%s", thread_id
             )
@@ -268,21 +257,19 @@ class TaskRunner:
             ) from exc
 
     # ------------------------------------------------------------------
-    # thread_id persistence (app-layer concern — not in SqliteSaver)
+    # thread_id 持久化（应用层职责，不属于 SqliteSaver）
     # ------------------------------------------------------------------
 
     def _remember_thread_id(self, thread_id: str) -> None:
-        """Persist the most recent ``thread_id`` so ``get_last_thread_id``
-        can retrieve it later."""
+        """持久化最近的 ``thread_id``，供 ``get_last_thread_id`` 后续读取。"""
         path = self.config.last_thread_file
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(thread_id)
 
     def get_last_thread_id(self) -> str | None:
-        """Return the last persisted ``thread_id``, or ``None``.
+        """返回最近持久化的 ``thread_id``，不存在时返回 ``None``。
 
-        Callers use this to support "resume the last task" without the
-        user having to remember and re-type a UUID.
+        调用方借此支持“恢复最近任务”，用户无需记忆并重新输入 UUID。
         """
         path = self.config.last_thread_file
         if not path.exists():

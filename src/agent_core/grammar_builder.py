@@ -16,10 +16,10 @@ from agent_core.llm_engine import compile_json_schema_to_gbnf
 from llama_cpp import LlamaGrammar
 
 # ---------------------------------------------------------------------------
-# [INTERNAL] Schema validation
+# [内部实现] Schema 校验
 # ---------------------------------------------------------------------------
 
-# GBNF special characters that need escaping inside string literals.
+# 需要在字符串字面量中转义的 GBNF 特殊字符。
 _GBNF_ESCAPE_TABLE = {
     '"': '\\"',
     "\\": "\\\\",
@@ -30,7 +30,7 @@ _GBNF_ESCAPE_TABLE = {
 
 
 def _gbnf_escape(value: str) -> str:
-    """Escape special characters in *value* so it renders safely in a GBNF string."""
+    """转义 *value* 中的特殊字符，使其能安全渲染到 GBNF 字符串中。"""
     return "".join(_GBNF_ESCAPE_TABLE.get(ch, ch) for ch in value)
 
 
@@ -60,7 +60,7 @@ def _validate_no_unresolved_refs(schema: Dict[str, Any], path: str = "$") -> Non
 
 
 # ---------------------------------------------------------------------------
-# [INTERNAL] Cached compilation
+# [内部实现] 编译缓存
 # ---------------------------------------------------------------------------
 
 
@@ -74,7 +74,7 @@ def _cached_compile(schema_json_str: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# [STABLE] Public API
+# [稳定接口] 公共 API
 # ---------------------------------------------------------------------------
 
 
@@ -95,19 +95,19 @@ def build_json_grammar(schema: Dict[str, Any]) -> LlamaGrammar:
 
 
 def build_enum_grammar(options: List[str]) -> LlamaGrammar:
-    """Build a GBNF grammar that restricts output to exactly one of *options*.
+    """构建将输出严格限制为 *options* 其中一项的 GBNF Grammar。
 
-    Each option is wrapped in double-quotes (GBNF string literal) and
-    special characters are escaped.  The generated grammar looks like::
+    每个选项都由双引号包裹（GBNF 字符串字面量），并转义特殊字符。生成的
+    Grammar 如下::
 
         root ::= "continue" | "done" | "failed"
 
-    This is used by the Planner node to constrain the routing decision
-    (e.g. ``["continue", "done", "failed"]``).
+    Planner 节点使用它约束路由决策，例如
+    ``["continue", "done", "failed"]``。
 
-    Raises:
-        GrammarCompileError: if *options* is empty (grammar would be vacuously
-            unsatisfiable, which locks up constrained decoding).
+    异常：
+        GrammarCompileError：*options* 为空时抛出。此时 Grammar 必然不可满足，
+            会导致约束解码锁死。
     """
     if not options:
         raise GrammarCompileError(
@@ -121,11 +121,10 @@ def build_enum_grammar(options: List[str]) -> LlamaGrammar:
 
 
 def build_tool_call_grammar(tools: List[Any]) -> str:
-    """Build a GBNF grammar that constrains the model to emit a valid tool call.
+    """构建约束模型输出有效工具调用的 GBNF Grammar。
 
-    Each tool is expected to have at least a ``name`` attribute and an
-    ``input_schema`` dict (the JSON Schema for its arguments).  The generated
-    grammar wraps all tools in a ``oneOf`` JSON Schema::
+    每个工具至少应具有 ``name`` 属性和 ``input_schema`` 字典，后者是其参数的
+    JSON Schema。生成的 Grammar 会把所有工具包装进 ``oneOf`` JSON Schema::
 
         {
           "oneOf": [
@@ -139,15 +138,14 @@ def build_tool_call_grammar(tools: List[Any]) -> str:
           ]
         }
 
-    and delegates to ``build_json_grammar`` for the actual conversion.
+    然后委托 ``build_json_grammar`` 完成实际转换。
 
-    Raises:
-        GrammarCompileError: if any tool is missing ``name`` or ``input_schema``.
+    异常：
+        GrammarCompileError：任一工具缺少 ``name`` 或 ``input_schema`` 时抛出。
     """
     variants: List[Dict[str, Any]] = []
     for tool in tools:
-        # Accept objects with .name / .input_schema attributes (Capability)
-        # as well as plain dicts.
+        # 同时接受具有 .name / .input_schema 属性的对象（Capability）和普通字典。
         if isinstance(tool, dict):
             name = tool.get("name") or tool.get("function", {}).get("name")
             input_schema = tool.get("input_schema") or tool.get(

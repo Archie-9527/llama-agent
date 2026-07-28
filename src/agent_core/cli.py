@@ -1,16 +1,16 @@
-"""CLI layer — the single user-facing entry point.
+"""CLI 层——唯一面向用户的入口。
 
-Responsibilities (and what is deliberately excluded):
-    * Parse command-line arguments (argparse).
-    * Load AppConfig + EngineConfig via config.py.
-    * Call ``initialize_engine`` exactly once (Fail-Fast).
-    * Drive ``TaskRunner`` for ``run`` / ``resume`` subcommands.
-    * Print human-readable results.
+职责（以及有意排除的内容）：
+    * 使用 argparse 解析命令行参数。
+    * 通过 config.py 加载 AppConfig 和 EngineConfig。
+    * 只调用一次 ``initialize_engine``，并快速失败。
+    * 为 ``run`` / ``resume`` 子命令驱动 ``TaskRunner``。
+    * 打印人类可读的结果。
 
-Explicitly NOT:
-    * Importing anything from the graph package.
-    * Calling ``get_engine()`` directly.
-    * Exiting the process (only ``main()`` returns an exit code).
+明确不负责：
+    * 从 graph 包导入任何内容。
+    * 直接调用 ``get_engine()``。
+    * 退出进程，只有 ``main()`` 返回退出码。
 """
 
 from __future__ import annotations
@@ -32,25 +32,25 @@ from agent_core.llm_engine import EngineConfig, initialize_engine
 from agent_core.session import TaskRunner
 
 # ---------------------------------------------------------------------------
-# Exit codes
+# 退出码
 # ---------------------------------------------------------------------------
 
 EXIT_OK = 0
 EXIT_BUSINESS_ERROR = 1
-# 2 is reserved by argparse for invalid arguments
+# 退出码 2 由 argparse 保留，用于表示参数无效
 EXIT_NO_RESUMABLE_TASK = 3
 EXIT_ENGINE_INIT_ERROR = 4
 
 
 # ---------------------------------------------------------------------------
-# [INTERNAL] Helpers
+# [内部实现] 辅助函数
 # ---------------------------------------------------------------------------
 
 
 def _setup_logging(level: str, *, log_file: Path | None = None) -> None:
-    """Configure the root logger.  Invalid level strings silently fall back
-    to ``INFO``.  Full-screen TUI mode writes to a file so log lines cannot
-    corrupt the terminal layout."""
+    """配置根 Logger。无效级别字符串会静默回退到 ``INFO``。全屏 TUI 模式
+    会把日志写入文件，避免日志行破坏终端布局。
+    """
     resolved = getattr(logging, level.upper(), logging.INFO)
     handlers = None
     force = False
@@ -71,7 +71,7 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="llama-agent", description="Local LLM Agent — CLI"
     )
 
-    # --- global flags (apply to all subcommands) ---------------------------
+    # --- 全局参数（适用于所有子命令）--------------------------------------
     parser.add_argument(
         "--config", type=Path, default=None, help="Path to TOML config file"
     )
@@ -93,7 +93,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    # --- run ---------------------------------------------------------------
+    # --- 运行新任务 --------------------------------------------------------
     run_p = subparsers.add_parser("run", help="Start a new task")
     run_p.add_argument("goal", type=str, help="Task description")
     run_p.add_argument(
@@ -101,17 +101,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Override max planning iterations",
     )
 
-    # --- resume ------------------------------------------------------------
+    # --- 恢复任务 ----------------------------------------------------------
     resume_p = subparsers.add_parser("resume", help="Resume an interrupted task")
     resume_p.add_argument(
         "thread_id", type=str, nargs="?", default=None,
         help="Thread ID to resume (omit to resume the most recent task)",
     )
 
-    # --- show-config -------------------------------------------------------
+    # --- 显示配置 ----------------------------------------------------------
     subparsers.add_parser("show-config", help="Print merged config and exit")
 
-    # --- user-visible multi-turn conversation -----------------------------
+    # --- 用户可见的多轮会话 ------------------------------------------------
     continue_p = subparsers.add_parser(
         "continue", help="Continue or start a persistent conversation"
     )
@@ -136,7 +136,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "list-conversations", help="List persistent conversations"
     )
 
-    # --- benchmark parent process (does not load the model itself) --------
+    # --- Benchmark 父进程（自身不加载模型）--------------------------------
     benchmark_p = subparsers.add_parser(
         "benchmark", help="Run an isolated R0 benchmark suite"
     )
@@ -157,7 +157,7 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
 
-    # --- fixed-policy R0/R1/R2 ablation ----------------------------------
+    # --- 固定策略的 R0/R1/R2 消融 -----------------------------------------
     ablation_p = subparsers.add_parser(
         "ablation",
         help="Run the same cases under R0, R1 and R2 and compare them",
@@ -206,7 +206,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _collect_app_cli_overrides(args: argparse.Namespace) -> dict:
-    """Extract AppConfig overrides from parsed CLI args."""
+    """从已解析的 CLI 参数中提取 AppConfig 覆盖项。"""
     overrides: dict = {}
     if args.db_path is not None:
         overrides["db_path"] = args.db_path
@@ -218,7 +218,7 @@ def _collect_app_cli_overrides(args: argparse.Namespace) -> dict:
 
 
 def _collect_engine_cli_overrides(args: argparse.Namespace) -> dict:
-    """Extract EngineConfig overrides from parsed CLI args."""
+    """从已解析的 CLI 参数中提取 EngineConfig 覆盖项。"""
     overrides: dict = {}
     if args.model_path is not None:
         overrides["model_path"] = args.model_path
@@ -291,21 +291,21 @@ def _print_result(result: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# [STABLE] main — the CLI entry point
+# [稳定接口] main——CLI 入口
 # ---------------------------------------------------------------------------
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Parse CLI args, load config, initialise the engine, and dispatch.
+    """解析 CLI 参数、加载配置、初始化引擎并分发命令。
 
-    Returns an exit code (0–4).  This function never calls ``sys.exit()``
-    itself — that is the caller's responsibility.
+    返回退出码 0～4。本函数自身从不调用 ``sys.exit()``，退出进程是调用方的
+    职责。
     """
-    # Step 1 — argparse (SystemExit(2) for invalid args, not caught here)
+    # 步骤 1——argparse（参数无效时抛出 SystemExit(2)，此处不捕获）
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    # Step 2 — application config
+    # 步骤 2——应用配置
     try:
         app_config = load_app_config(
             config_file=args.config,
@@ -326,15 +326,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Interactive CLI config error: {exc}", file=sys.stderr)
             return EXIT_BUSINESS_ERROR
 
-    # Step 3 — logging
+    # 步骤 3——日志
     _setup_logging(
         app_config.log_level,
         log_file=tui_config.log_file if tui_config is not None else None,
     )
     logger = logging.getLogger("agent_core.cli")
 
-    # Benchmark is a parent-only command.  Each sample loads its own model in
-    # a fresh worker process, preventing allocator/KV state contamination.
+    # Benchmark 只在父进程中编排。每个样本在全新的 Worker 进程中加载自己的
+    # 模型，防止分配器和 KV 状态相互污染。
     if args.command == "benchmark":
         from agent_core.benchmark.runner import BenchmarkRunner
 
@@ -364,9 +364,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Report: {run_dir / 'report.md'}")
         return EXIT_OK
 
-    # The automated ablation is also parent-only.  Its policy matrix is
-    # internal and therefore cannot be accidentally changed by ambient
-    # AGENT_MEMORY_* variables or edits between rounds.
+    # 自动消融也只在父进程中编排。其策略矩阵位于内部，因此不会被环境中的
+    # AGENT_MEMORY_* 变量或轮次之间的配置编辑意外改变。
     if args.command == "ablation":
         from agent_core.benchmark.ablation import (
             console_progress,
@@ -406,7 +405,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Comparison report: {result.report_path}")
         return EXIT_OK
 
-    # Step 4 — show-config (must NOT initialise engine or create TaskRunner)
+    # 步骤 4——显示配置（不得初始化引擎或创建 TaskRunner）
     if args.command == "show-config":
         _print_config(app_config)
         try:
@@ -447,7 +446,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Telemetry config error: {exc}", file=sys.stderr)
         return EXIT_BUSINESS_ERROR
 
-    # Step 5 — engine initialisation (one-shot, must happen before TaskRunner)
+    # 步骤 5——初始化引擎（只执行一次，必须早于 TaskRunner）
     try:
         engine_config = load_engine_config(
             config_file=args.config,
@@ -464,7 +463,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Model load failed: {exc}", file=sys.stderr)
         return EXIT_ENGINE_INIT_ERROR
 
-    # Step 6 — tool bootstrap (must happen BEFORE ReAct subgraph construction)
+    # 步骤 6——引导工具（必须早于 ReAct 子图构建）
     try:
         from agent_core.config import load_tools_config
         from agent_core.capabilities.bootstrap import bootstrap_capabilities
@@ -477,7 +476,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Tool bootstrap failed: {exc}", file=sys.stderr)
         return EXIT_BUSINESS_ERROR
 
-    # Step 7 — ReAct inner subgraph construction (reads from capability_registry)
+    # 步骤 7——构建 ReAct 内部子图（从 capability_registry 读取）
     try:
         from agent_core.artifacts.virtualizer import (
             initialize_artifact_virtualizer,
@@ -497,7 +496,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ReAct agent init failed: {exc}", file=sys.stderr)
         return EXIT_BUSINESS_ERROR
 
-    # Step 8 — TaskRunner
+    # 步骤 8——创建 TaskRunner
     try:
         runner = TaskRunner(app_config.to_run_config())
     except Exception as exc:
@@ -507,7 +506,7 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_BUSINESS_ERROR
     conversation_store = None
     try:
-        # Step 9 — dispatch
+        # 步骤 9——分发命令
         if args.command == "run":
             thread_id, result = runner.start_new_task(args.goal)
             print(f"Task ID: {thread_id}")
@@ -631,7 +630,7 @@ def main(argv: list[str] | None = None) -> int:
                     run_turn(text)
             return EXIT_OK
 
-    # Step 10 — exception normalisation
+    # 步骤 10——异常规范化
     except ValueError as exc:
         print(f"Argument error: {exc}", file=sys.stderr)
         return EXIT_BUSINESS_ERROR

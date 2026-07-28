@@ -1,11 +1,11 @@
-"""Local shell-command execution capability provider.
+"""本地 Shell 命令执行能力 Provider。
 
-Safety invariants:
-    * Allowlist-only (not denylist) for command names.
-    * ``subprocess.run`` with ``shell=False`` — no injection.
-    * Mandatory timeout on every invocation.
-    * Output truncated to ``max_output_chars``.
-    * Internal errors return text — they never crash the graph.
+安全约束：
+    * 命令名称只允许使用白名单，而不是黑名单。
+    * 使用 ``shell=False`` 调用 ``subprocess.run``，避免命令注入。
+    * 每次调用都必须设置超时。
+    * 输出截断到 ``max_output_chars``。
+    * 内部错误以文本形式返回，绝不能导致图崩溃。
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ class ShellToolConfig:
 
 @register_provider
 class ShellCapabilityProvider(CapabilityProvider):
-    """Local shell execution.  TOML section: ``[tools.providers.shell]``."""
+    """本地 Shell 执行。对应 TOML 段：``[tools.providers.shell]``。"""
 
     category = "shell"
 
@@ -56,7 +56,7 @@ class ShellCapabilityProvider(CapabilityProvider):
             stderr: str = "",
             error: str | None = None,
         ) -> str:
-            """Return a stable, machine-readable result to the model."""
+            """向模型返回稳定且机器可读的结果。"""
             combined_length = len(stdout) + len(stderr)
             if combined_length > config.max_output_chars:
                 remaining = config.max_output_chars

@@ -1,9 +1,8 @@
-"""Thread-local event capture for the synchronous Agent runtime.
+"""同步 Agent 运行时的线程局部事件捕获。
 
-The core graph remains synchronous.  A TUI runs it in one worker thread and
-installs an event sink for that thread.  Graph nodes, model calls and tools can
-then publish small UI events without depending on Textual or changing
-AgentState/checkpoint schemas.
+核心图保持同步运行。TUI 在一个工作线程中执行核心图，并为该线程安装事件接收
+器。图节点、模型调用和工具随后可以发布轻量 UI 事件，而无需依赖 Textual，
+也无需修改 AgentState 或 Checkpoint Schema。
 """
 
 from __future__ import annotations
@@ -34,10 +33,9 @@ def interactive_events_enabled() -> bool:
 
 
 def emit_interactive_event(kind: str, **data: Any) -> None:
-    """Publish an event when an interactive capture scope is active.
+    """当交互式捕获作用域处于活动状态时发布事件。
 
-    UI diagnostics must never make an otherwise valid Agent task fail, so a
-    subscriber exception is intentionally swallowed.
+    UI 诊断不能导致原本有效的 Agent 任务失败，因此会有意吞掉订阅者异常。
     """
 
     sink = _event_sink.get()

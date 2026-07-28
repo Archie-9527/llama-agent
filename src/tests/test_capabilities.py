@@ -1,10 +1,10 @@
-"""Tests for the V3.0 capability layer and graph improvements.
+"""V3.0 能力层与图改进测试。
 
-Coverage:
-    - capabilities/base.py (auto-discovery, registration, isolation)
-    - capabilities/bootstrap.py (ToolsConfig, build_capability_map, bootstrap)
-    - capabilities/providers/* (shell, file, log, sqlite, artifact, skills)
-    - build_graph.py V3 (normalize_entry_state, error isolation, routing)
+覆盖范围：
+    - capabilities/base.py（自动发现、注册、隔离）
+    - capabilities/bootstrap.py（ToolsConfig、build_capability_map、引导）
+    - capabilities/providers/*（Shell、文件、日志、SQLite、Artifact、Skill）
+    - build_graph.py V3（normalize_entry_state、错误隔离、路由）
 """
 
 from __future__ import annotations
@@ -76,7 +76,7 @@ from agent_core.graph.build_graph import (
 )
 from agent_core.config import load_tools_config
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
+# ── 辅助函数 ────────────────────────────────────────────────────────────────
 
 
 def _write_yaml(path: Path, data: dict) -> None:
@@ -84,7 +84,7 @@ def _write_yaml(path: Path, data: dict) -> None:
     path.write_text(yaml.dump(data))
 
 
-# ── Fixtures ─────────────────────────────────────────────────────────────────
+# ── 测试夹具 ─────────────────────────────────────────────────────────────────
 
 
 @pytest.fixture(autouse=True)
@@ -98,7 +98,7 @@ def _isolate_registry():
 
 
 # ============================================================================
-# base.py tests
+# base.py 测试
 # ============================================================================
 
 
@@ -157,7 +157,7 @@ class TestIsolatedFailure:
             def build(self, raw_config):
                 raise ToolProviderConfigError("intentional")
 
-        # Simulate registration via @register_provider
+        # 模拟通过 @register_provider 注册
         _PROVIDER_REGISTRY["test-healthy"] = _HealthyProvider
         _PROVIDER_REGISTRY["test-failing"] = _FailingProvider
 
@@ -171,7 +171,7 @@ class TestIsolatedFailure:
 
 class TestBuildCapabilityMap:
     def test_enabled_tools_filtering(self):
-        # Register a test provider
+        # 注册测试 Provider
         class _TestProvider(CapabilityProvider):
             category = "test-filter"
             def build(self, raw_config):
@@ -242,7 +242,7 @@ class TestBootstrap:
 
 
 # ============================================================================
-# Built-in provider tests
+# 内置 Provider 测试
 # ============================================================================
 
 
@@ -481,7 +481,7 @@ class TestSkillsProvider:
 
 
 # ============================================================================
-# build_graph.py V3 tests
+# build_graph.py V3 测试
 # ============================================================================
 
 
@@ -587,7 +587,7 @@ class TestBuildGraphV3:
 
 
 # ============================================================================
-# load_tools_config integration
+# load_tools_config 集成测试
 # ============================================================================
 
 
@@ -606,7 +606,7 @@ class TestLoadToolsConfig:
         assert cfg.providers["shell"]["allowed_commands"] == ["ls", "cat"]
 
     def test_defaults(self, monkeypatch, tmp_path):
-        # Avoid auto-detecting the repository's real agent_config.toml.
+        # 避免自动探测仓库中的真实 agent_config.toml。
         monkeypatch.chdir(tmp_path)
         cfg = load_tools_config()
         assert cfg.enabled_tools == []
@@ -614,13 +614,12 @@ class TestLoadToolsConfig:
 
 
 # ============================================================================
-# AgentState typing
+# AgentState 类型
 # ============================================================================
 
 
 def test_agent_state_backward_compat():
-    """Ensure AgentState still has all required fields for tests that
-    construct it manually."""
+    """确保 AgentState 仍包含手工构造它的测试所需的全部字段。"""
     state: AgentState = {
         "task_goal": "t",
         "plan_steps": [],
@@ -631,5 +630,5 @@ def test_agent_state_backward_compat():
         "max_iterations": 10,
         "current_iteration": 0,
     }
-    # Just verify construction doesn't fail
+    # 只验证构造过程不会失败
     assert state["task_goal"] == "t"

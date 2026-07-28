@@ -1,4 +1,4 @@
-"""R2 lifecycle-aware logical context management."""
+"""R2 生命周期感知的逻辑上下文管理。"""
 
 from agent_core.memory.context_manager import (
     get_lifecycle_context_manager,

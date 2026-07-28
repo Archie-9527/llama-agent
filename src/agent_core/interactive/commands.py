@@ -1,4 +1,4 @@
-"""Slash-command parser for the interactive terminal."""
+"""交互式终端的斜杠命令解析器。"""
 
 from __future__ import annotations
 
@@ -40,11 +40,10 @@ def parse_input(
     tool_names: Iterable[str] = (),
     skill_names: Iterable[str] = (),
 ) -> ParsedInput:
-    """Parse user input without executing anything.
+    """只解析用户输入，不执行任何操作。
 
-    ``/<capability> request`` and ``/tool <capability> request`` constrain the
-    normal Agent turn to that capability; they do not bypass the Agent's tool
-    validation/execution pipeline.
+    ``/<capability> request`` 和 ``/tool <capability> request`` 会把普通 Agent
+    轮次限制到指定能力，但不会绕过 Agent 的工具校验与执行管线。
     """
 
     stripped = text.strip()

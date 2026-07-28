@@ -1,18 +1,17 @@
-"""Configuration layer — merge defaults, TOML file, env vars, and CLI overrides.
+"""配置层——合并默认值、TOML 文件、环境变量和 CLI 覆盖项。
 
-Two config domains share one merge algorithm:
-    * ``AppConfig``   — orchestration / UI (max_iterations, db_path, etc.)
-    * ``EngineConfig`` — LLM inference kernel (model_path, n_ctx, etc.)
+两个配置域共享同一种合并算法：
+    * ``AppConfig``——编排 / UI，例如 max_iterations、db_path。
+    * ``EngineConfig``——LLM 推理内核，例如 model_path、n_ctx。
 
-Design constraints:
-    1. ``AppConfig`` is a frozen dataclass.
-    2. Both configs use the same ``_cast_layer`` / ``_load_env_layer`` /
-       ``_resolve_config_file`` helpers — never copy-paste logic per domain.
-    3. Type-cast failures raise ``ValueError`` with field name + raw value.
-    4. Explicit ``config_file`` missing → ``FileNotFoundError``; implicit
-       search missing → empty dict (no error).
-    5. TOML files must use ``[agent]`` / ``[engine]`` sections — flat keys
-       are silently ignored.
+设计约束：
+    1. ``AppConfig`` 是冻结的 DataClass。
+    2. 两种配置都使用相同的 ``_cast_layer``、``_load_env_layer`` 和
+       ``_resolve_config_file`` 辅助函数，不得为各配置域复制粘贴逻辑。
+    3. 类型转换失败会抛出包含字段名称和原始值的 ``ValueError``。
+    4. 显式指定的 ``config_file`` 不存在 → ``FileNotFoundError``；隐式搜索未
+       找到 → 空字典，不报错。
+    5. TOML 文件必须使用 ``[agent]`` / ``[engine]`` 段；平铺键会被静默忽略。
 """
 
 from __future__ import annotations
@@ -40,7 +39,7 @@ except ModuleNotFoundError:
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Constants
+# 常量
 # ---------------------------------------------------------------------------
 
 ENV_PREFIX: str = "AGENT_"
@@ -53,15 +52,15 @@ _LOGGED_CONFIG_PATHS: set[Path] = set()
 
 
 # ---------------------------------------------------------------------------
-# [STABLE] AppConfig — orchestration / CLI tunables
+# [稳定接口] AppConfig——编排 / CLI 可调参数
 # ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
 class AppConfig:
-    """Single source of truth for orchestration-layer configuration.
+    """编排层配置的唯一信息源。
 
-    Every field here has a default — ``AppConfig()`` is always valid.
+    此处每个字段都有默认值，因此 ``AppConfig()`` 始终有效。
     """
 
     max_iterations: int = 6
@@ -74,8 +73,7 @@ class AppConfig:
     conversation_history_token_budget: int = 4096
 
     def to_run_config(self):
-        """Convert to ``session.RunConfig``, keeping the two data structures
-        decoupled."""
+        """转换为 ``session.RunConfig``，保持两种数据结构解耦。"""
         from agent_core.session import RunConfig
 
         return RunConfig(
@@ -87,11 +85,10 @@ class AppConfig:
 
 @dataclass(frozen=True)
 class TuiConfig:
-    """Interactive terminal UI settings.
+    """交互式终端 UI 设置。
 
-    Thinking generation is controlled independently by
-    ``EngineConfig.disable_thinking``.  ``show_thinking`` only decides
-    whether reasoning returned by the model is rendered in the transcript.
+    Thinking 生成由 ``EngineConfig.disable_thinking`` 独立控制；
+    ``show_thinking`` 只决定是否在对话记录中渲染模型返回的推理内容。
     """
 
     show_thinking: bool = False
@@ -113,7 +110,7 @@ class TuiConfig:
 
 @dataclass(frozen=True)
 class MemoryConfig:
-    """Independent optimization switches required for later ablation rounds."""
+    """后续消融轮次需要的独立优化开关。"""
 
     artifact_virtualization: bool = False
     artifact_inline_max_bytes: int = 8192
@@ -179,7 +176,7 @@ class MemoryConfig:
 
 
 # ---------------------------------------------------------------------------
-# Per-domain type-caster tables
+# 各配置域的类型转换表
 # ---------------------------------------------------------------------------
 
 
@@ -262,19 +259,18 @@ _ENGINE_FIELD_CASTERS: dict[str, Callable] = {
     "verbose": lambda v: str(v).strip().lower() in ("1", "true", "yes"),
     "request_timeout": float,
     "disable_thinking": lambda v: str(v).strip().lower() in ("1", "true", "yes"),
-    # ``stop`` is intentionally absent — it is a list and cannot be
-    # expressed as a single env-var / CLI value.  Only the TOML file
-    # (array syntax) can set it.
+# 此处有意不包含 ``stop``——它是列表，无法表示为单个环境变量或 CLI 值，
+# 只能通过 TOML 文件的数组语法设置。
 }
 
 
 # ---------------------------------------------------------------------------
-# Shared helpers (used by both AppConfig and EngineConfig loading)
+# 共享辅助函数（AppConfig 与 EngineConfig 加载过程共同使用）
 # ---------------------------------------------------------------------------
 
 
 def _load_toml_file(path: Path) -> dict[str, Any]:
-    """Read and parse a TOML file.  Returns ``{}`` if ``tomllib`` is unavailable."""
+    """读取并解析 TOML 文件；``tomllib`` 不可用时返回 ``{}``。"""
     if tomllib is None:
         logger.warning("tomllib not available — skipping config file %s", path)
         return {}
@@ -283,10 +279,10 @@ def _load_toml_file(path: Path) -> dict[str, Any]:
 
 
 def _resolve_config_file(config_file: Optional[Path]) -> dict[str, Any]:
-    """Find and load the TOML config file.
+    """查找并加载 TOML 配置文件。
 
-    * Explicit path → missing raises ``FileNotFoundError``.
-    * Implicit search → first hit wins; all missing returns ``{}``.
+    * 显式路径 → 文件缺失时抛出 ``FileNotFoundError``。
+    * 隐式搜索 → 使用第一个命中项；全部缺失时返回 ``{}``。
     """
     if config_file is not None:
         if not config_file.exists():
@@ -306,12 +302,12 @@ def _resolve_config_file(config_file: Optional[Path]) -> dict[str, Any]:
 
 
 def _load_env_layer(prefix: str, casters: dict[str, Callable]) -> dict[str, Any]:
-    """Scan ``os.environ`` for keys with *prefix*.
+    """扫描 ``os.environ`` 中带 *prefix* 的键。
 
     ``AGENT_MAX_ITERATIONS=10`` → ``{"max_iterations": "10"}``.
 
-    Only keys whose mapped field name appears in *casters* are collected.
-    Unknown ``AGENT_*`` vars are silently skipped.
+    只收集映射后字段名称存在于 *casters* 的键；未知 ``AGENT_*`` 变量会被静默
+    跳过。
     """
     result: dict[str, Any] = {}
     for key, value in os.environ.items():
@@ -325,10 +321,10 @@ def _load_env_layer(prefix: str, casters: dict[str, Callable]) -> dict[str, Any]
 def _cast_layer(
     raw: dict[str, Any], casters: dict[str, Callable]
 ) -> dict[str, Any]:
-    """Apply type conversion to every value in *raw*.
+    """对 *raw* 中的每个值应用类型转换。
 
-    * Unknown keys → logged as WARNING and dropped.
-    * Conversion failure → ``ValueError`` with field name + raw value.
+    * 未知键 → 记录 WARNING 并丢弃。
+    * 转换失败 → 抛出包含字段名称和原始值的 ``ValueError``。
     """
     casted: dict[str, Any] = {}
     for key, value in raw.items():
@@ -346,7 +342,7 @@ def _cast_layer(
 
 
 # ---------------------------------------------------------------------------
-# [STABLE] Public entry points
+# [稳定接口] 公共入口
 # ---------------------------------------------------------------------------
 
 
@@ -354,13 +350,13 @@ def load_app_config(
     config_file: Optional[Path] = None,
     cli_overrides: Optional[dict[str, Any]] = None,
 ) -> AppConfig:
-    """Merge four layers into an ``AppConfig``.
+    """将四层配置合并为 ``AppConfig``。
 
-    Layers (later overrides earlier):
-        1. ``AppConfig()`` defaults
-        2. TOML ``[agent]`` section
-        3. ``AGENT_*`` environment variables
-        4. *cli_overrides* (values that are not ``None``)
+    配置层（后者覆盖前者）：
+        1. ``AppConfig()`` 默认值
+        2. TOML ``[agent]`` 段
+        3. ``AGENT_*`` 环境变量
+        4. *cli_overrides* 中不为 ``None`` 的值
     """
     file_data = _resolve_config_file(config_file)
 
@@ -379,14 +375,13 @@ def load_engine_config(
     config_file: Optional[Path] = None,
     cli_overrides: Optional[dict[str, Any]] = None,
 ) -> EngineConfig:
-    """Merge four layers into an ``EngineConfig``.
+    """将四层配置合并为 ``EngineConfig``。
 
-    Unlike ``load_app_config``, this function explicitly checks for
-    ``model_path`` after merging because ``EngineConfig`` has a required
-    field without a default.
+    与 ``load_app_config`` 不同，本函数会在合并后显式检查 ``model_path``，
+    因为它是 ``EngineConfig`` 中没有默认值的必填字段。
 
-    Raises:
-        ValueError: If ``model_path`` is absent after merging all layers.
+    异常：
+        ValueError：合并所有配置层后仍缺少 ``model_path`` 时抛出。
     """
     file_data = _resolve_config_file(config_file)
 
@@ -411,24 +406,23 @@ def load_engine_config(
 
 
 def config_field_names() -> set[str]:
-    """Return the set of ``AppConfig`` field names (for tests / validation)."""
+    """返回 ``AppConfig`` 字段名称集合，供测试和校验使用。"""
     return {f.name for f in fields(AppConfig)}
 
 
 def engine_config_field_names() -> set[str]:
-    """Return the set of ``EngineConfig`` field names (for tests / validation)."""
+    """返回 ``EngineConfig`` 字段名称集合，供测试和校验使用。"""
     return {f.name for f in fields(EngineConfig)}
 
 
-# Backward-compat alias
+# 向后兼容别名
 load_config = load_app_config
 
 
 def load_tools_config(config_file: Optional[Path] = None) -> "ToolsConfig":
-    """Load tool configuration from the ``[tools]`` TOML section.
+    """从 TOML 的 ``[tools]`` 段加载工具配置。
 
-    The ``providers`` sub-dict is passed through as-is — each
-    provider owns its own parsing and validation.
+    ``providers`` 子字典会原样传递，每个 Provider 自行负责解析与校验。
     """
     from agent_core.capabilities.bootstrap import ToolsConfig
 
@@ -444,10 +438,10 @@ def load_telemetry_config(
     config_file: Optional[Path] = None,
     cli_overrides: Optional[dict[str, Any]] = None,
 ) -> TelemetryConfig:
-    """Load the optional ``[telemetry]`` section.
+    """加载可选的 ``[telemetry]`` 段。
 
-    Environment names use ``AGENT_TELEMETRY_*`` to avoid colliding with
-    application fields, e.g. ``AGENT_TELEMETRY_ENABLED=true``.
+    环境变量使用 ``AGENT_TELEMETRY_*`` 命名，避免与应用字段冲突，例如
+    ``AGENT_TELEMETRY_ENABLED=true``。
     """
     file_data = _resolve_config_file(config_file)
     merged = _cast_layer(
@@ -470,7 +464,7 @@ def load_tui_config(
     config_file: Optional[Path] = None,
     cli_overrides: Optional[dict[str, Any]] = None,
 ) -> TuiConfig:
-    """Load ``[tui]`` with ``AGENT_TUI_*`` environment overrides."""
+    """加载 ``[tui]``，并应用 ``AGENT_TUI_*`` 环境变量覆盖。"""
 
     file_data = _resolve_config_file(config_file)
     merged = _cast_layer(file_data.get("tui", {}), _TUI_FIELD_CASTERS)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a reproducible R0/R1/R2 benchmark and build the comparison report."""
+"""运行可复现的 R0/R1/R2 Benchmark 并构建对比报告。"""
 
 from __future__ import annotations
 

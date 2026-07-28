@@ -1,4 +1,4 @@
-"""Deterministic benchmark correctness checks."""
+"""确定性的 Benchmark 正确性检查。"""
 
 from __future__ import annotations
 

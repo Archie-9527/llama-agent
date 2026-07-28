@@ -1,16 +1,14 @@
-"""Checkpointer lifecycle — SQLite-based persistence for the outer graph.
+"""Checkpointer 生命周期——基于 SQLite 的外层图持久化。
 
-The checkpointer writes a snapshot of the full ``AgentState`` after
-each outer-graph node completes.  Crash recovery is driven by
-``thread_id``: re-invoking with the same ``thread_id`` resumes from
-the last completed node rather than restarting from ``planner_node``.
+每个外层图节点完成后，Checkpointer 都会写入完整 ``AgentState`` 快照。
+崩溃恢复由 ``thread_id`` 驱动：使用同一 ``thread_id`` 再次调用时，会从最后
+完成的节点继续，而不是从 ``planner_node`` 重新开始。
 
-Design note:
-    Only the **outer** graph receives the checkpointer.  The inner
-    ReAct subgraph is deliberately not checkpointed — see §6.2 of
-    the orchestration-layer design doc for the trade-off analysis.
+设计说明：
+    只有**外层**图接收 Checkpointer。内部 ReAct 子图有意不设置 Checkpoint，
+    相关权衡分析见编排层设计文档第 6.2 节。
 
-Usage (in cli.py)::
+用法（位于 cli.py）::
 
     with get_checkpointer("data/checkpoints.sqlite") as cp:
         graph = build_graph(checkpointer=cp)
@@ -26,15 +24,15 @@ from typing import Iterator
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 # ---------------------------------------------------------------------------
-# Default location — relative to the project root.
-# The caller (build_graph / cli) may override this.
+# 默认位置——相对于项目根目录。
+# 调用方（build_graph / cli）可以覆盖该路径。
 # ---------------------------------------------------------------------------
 
 DEFAULT_DB_PATH = Path("data/checkpoints.sqlite")
 
 
 # ---------------------------------------------------------------------------
-# [STABLE] get_checkpointer
+# [稳定接口] get_checkpointer
 # ---------------------------------------------------------------------------
 
 
@@ -42,18 +40,17 @@ DEFAULT_DB_PATH = Path("data/checkpoints.sqlite")
 def get_checkpointer(
     db_path: Path | str = DEFAULT_DB_PATH,
 ) -> Iterator[SqliteSaver]:
-    """Context manager that yields a ``SqliteSaver`` for outer-graph persistence.
+    """生成用于外层图持久化的 ``SqliteSaver`` 的上下文管理器。
 
-    The parent directory is created automatically if it doesn't exist.
-    The SQLite connection is cleaned up when the context exits.
+    父目录不存在时会自动创建；退出上下文时会清理 SQLite 连接。
 
-    Args:
-        db_path: Path to the SQLite database file.  Defaults to
-            ``data/checkpoints.sqlite`` in the current working directory.
+    参数：
+        db_path：SQLite 数据库文件路径，默认为当前工作目录下的
+            ``data/checkpoints.sqlite``。
 
-    Yields:
-        A ``SqliteSaver`` instance ready to be passed as the
-        ``checkpointer`` argument to ``graph.compile()``.
+    生成：
+        可直接作为 ``checkpointer`` 参数传给 ``graph.compile()`` 的
+        ``SqliteSaver`` 实例。
     """
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)

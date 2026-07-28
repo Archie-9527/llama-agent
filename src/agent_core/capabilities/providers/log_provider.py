@@ -1,4 +1,4 @@
-"""Structured analysis tools for deterministic local log files."""
+"""用于确定性本地日志文件的结构化分析工具。"""
 
 from __future__ import annotations
 

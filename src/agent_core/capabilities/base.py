@@ -1,20 +1,18 @@
-"""Capability provider core abstraction — the plugin architecture.
+"""能力 Provider 的核心抽象——插件架构。
 
-Every category of capability (file, log, SQLite, artifact, skills, …) is a
-``CapabilityProvider`` subclass that lives in its own file under
-``providers/``.  Adding a new category means adding a single new file
-— zero changes to any existing module.
+每一类能力（文件、日志、SQLite、Artifact、Skill 等）都是一个
+``CapabilityProvider`` 子类，并单独存放在 ``providers/`` 下的文件中。
+添加新类别只需增加一个文件，无需修改任何现有模块。
 
-Design principles:
-    1. Each provider is self-contained — it owns its config parsing,
-       validation, and ``Capability`` construction.
-    2. A single provider failing must not crash the whole bootstrap —
-       the error is logged and that provider's capabilities are skipped.
-    3. Providers are discovered automatically via ``@register_provider``
-       and ``providers/__init__.py``'s ``pkgutil`` scan.
-    4. ``build()`` returns ``list[Capability]`` — framework-agnostic
-       capability descriptors.  The conversion to LangChain
-       ``BaseTool`` happens only in ``react_agent_factory.py``.
+设计原则：
+    1. 每个 Provider 都是自包含的，独立负责配置解析、校验和 ``Capability``
+       构造。
+    2. 单个 Provider 失败不能导致整个引导过程崩溃；系统会记录错误并跳过该
+       Provider 的能力。
+    3. 通过 ``@register_provider`` 和 ``providers/__init__.py`` 中的
+       ``pkgutil`` 扫描自动发现 Provider。
+    4. ``build()`` 返回与框架无关的能力描述 ``list[Capability]``；只有
+       ``react_agent_factory.py`` 负责将其转换为 LangChain ``BaseTool``。
 """
 
 from __future__ import annotations
@@ -29,53 +27,53 @@ logger = logging.getLogger(__name__)
 
 
 class ToolProviderConfigError(Exception):
-    """A provider's raw config is missing required fields or contains
-    illegal values.  Caught by ``bootstrap.build_capability_map`` which
-    logs a WARNING and skips the provider rather than crashing."""
+    """Provider 原始配置缺少必填字段或包含非法值。
+
+    ``bootstrap.build_capability_map`` 会捕获该异常、记录 WARNING 并跳过对应
+    Provider，而不是让程序崩溃。
+    """
 
 
 # ---------------------------------------------------------------------------
-# [STABLE] CapabilityProvider — the single interface every provider implements
+# [稳定接口] CapabilityProvider——所有 Provider 必须实现的统一接口
 # ---------------------------------------------------------------------------
 
 
 class CapabilityProvider(ABC):
-    """Every capability provider must subclass this and decorate the class
-    with ``@register_provider``.
+    """所有能力 Provider 都必须继承本类，并使用 ``@register_provider`` 装饰。
 
-    Subclasses define two things:
-        * ``category`` — a string key (e.g. ``"shell"``, ``"skills"``)
-          matching the ``[tools.providers.<category>]`` TOML section.
-        * ``build(raw_config)`` — take the raw dict from that section
-          and return a list of ``Capability`` instances.
+    子类需要定义两项内容：
+        * ``category``——字符串键（例如 ``"shell"``、``"skills"``），与
+          TOML 的 ``[tools.providers.<category>]`` 段对应。
+        * ``build(raw_config)``——接收该配置段的原始字典，返回
+          ``Capability`` 实例列表。
     """
 
-    category: str  # must be set by subclass
+    category: str  # 必须由子类设置
 
     @abstractmethod
     def build(self, raw_config: dict[str, Any]) -> list[Capability]:
-        """Construct ``Capability`` instances from *raw_config*.
+        """根据 *raw_config* 构造 ``Capability`` 实例。
 
-        The bootstrap passes the raw TOML sub-table directly — each
-        provider owns its own parsing and validation.
+        引导程序会直接传入原始 TOML 子表，每个 Provider 自行负责解析与校验。
 
-        Raises:
-            ToolProviderConfigError: If required config is missing.
+        异常：
+            ToolProviderConfigError：缺少必需配置时抛出。
         """
         ...
 
 
 # ---------------------------------------------------------------------------
-# Self-registration — providers declare themselves via decorator
+# 自注册机制——Provider 通过装饰器声明自身
 # ---------------------------------------------------------------------------
 
 _PROVIDER_REGISTRY: dict[str, type[CapabilityProvider]] = {}
 
 
 def register_provider(cls: type[CapabilityProvider]) -> type[CapabilityProvider]:
-    """Class decorator: register a ``CapabilityProvider`` subclass.
+    """用于注册 ``CapabilityProvider`` 子类的类装饰器。
 
-    Duplicate ``category`` values are a programming error.
+    ``category`` 重复属于编程错误。
     """
     if cls.category in _PROVIDER_REGISTRY:
         raise ValueError(
@@ -88,15 +86,15 @@ def register_provider(cls: type[CapabilityProvider]) -> type[CapabilityProvider]
 
 
 def all_registered_categories() -> list[str]:
-    """Return every currently registered category name."""
+    """返回当前已注册的全部类别名称。"""
     return list(_PROVIDER_REGISTRY.keys())
 
 
 def get_provider_class(category: str) -> type[CapabilityProvider]:
-    """Look up a provider class by category name.
+    """根据类别名称查找 Provider 类。
 
-    Raises:
-        KeyError: If *category* is not registered.
+    异常：
+        KeyError：*category* 尚未注册时抛出。
     """
     if category not in _PROVIDER_REGISTRY:
         raise KeyError(

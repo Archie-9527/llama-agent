@@ -1,8 +1,7 @@
-"""AgentState — the single, canonical TypedDict for the outer graph.
+"""AgentState——外层图唯一且规范的 TypedDict。
 
-Every node in ``graph/`` must declare its input and output as
-``AgentState`` and **must not** add undeclared keys.  Extend this file
-first when a new field is needed.
+``graph/`` 中的每个节点都必须将输入和输出声明为 ``AgentState``，并且**不得**
+添加未声明的键。需要新字段时应先扩展本文件。
 """
 
 from __future__ import annotations
@@ -11,22 +10,21 @@ from typing import TypedDict
 
 
 class AgentState(TypedDict):
-    """Full state schema shared across planner / executor / reflector nodes.
+    """Planner、Executor 和 Reflector 节点共享的完整状态 Schema。
 
-    Attributes:
-        task_goal: The user's original task description.
-        plan_steps: Ordered list of steps produced by the Planner.
-        current_step_index: Zero-based index of the step the Executor
-            should work on next.
-        execution_log: Per-step records — each dict has keys
-            ``step`` (str), ``result`` (str), ``tool_used`` (str | None).
-        reflection_notes: History of Reflector evaluation notes.
-        status: Current lifecycle phase — ``planning``, ``executing``,
-            ``reflecting``, ``done``, or ``failed``.
-        max_iterations: Safety cap on planning-reflecting loops.
-        current_iteration: How many plan→reflect cycles have run so far.
-        final_answer: Stable, user-facing result created by the Finalizer.
-        error: Structured terminal failure, or ``None``.
+    属性：
+        task_goal：用户最初的任务描述。
+        plan_steps：Planner 生成的有序步骤列表。
+        current_step_index：Executor 下一步应处理步骤的从零开始索引。
+        execution_log：逐步骤记录，每个字典包含 ``step``（str）、
+            ``result``（str）和 ``tool_used``（str | None）。
+        reflection_notes：Reflector 评估记录历史。
+        status：当前生命周期阶段，可以是 ``planning``、``executing``、
+            ``reflecting``、``done`` 或 ``failed``。
+        max_iterations：计划—反思循环的安全上限。
+        current_iteration：目前已经执行的计划→反思循环次数。
+        final_answer：Finalizer 生成的稳定、面向用户的结果。
+        error：结构化终止错误，或 ``None``。
     """
 
     task_goal: str
@@ -34,7 +32,7 @@ class AgentState(TypedDict):
     current_step_index: int
     execution_log: list[dict]
     reflection_notes: list[str]
-    status: str  # "planning" | "executing" | "reflecting" | "done" | "failed"
+    status: str  # 可取 planning、executing、reflecting、done 或 failed
     max_iterations: int
     current_iteration: int
     final_answer: str

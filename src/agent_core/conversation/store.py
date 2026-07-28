@@ -1,4 +1,4 @@
-"""SQLite-backed Conversation/Turn persistence."""
+"""以 SQLite 为后端的 Conversation/Turn 持久化。"""
 
 from __future__ import annotations
 

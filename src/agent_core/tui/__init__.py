@@ -1,7 +1,6 @@
-"""Optional full-screen terminal front-end.
+"""可选的全屏终端前端。
 
-Textual is imported lazily so non-interactive commands and unit tests do not
-need to initialise terminal UI machinery.
+Textual 采用延迟导入，使非交互命令和单元测试无需初始化终端 UI 机制。
 """
 
 from __future__ import annotations
@@ -11,7 +10,7 @@ from typing import Any
 
 
 def discover_skill_names(tools_config: Any) -> set[str]:
-    """Read configured YAML skill names for UI grouping and completion."""
+    """读取配置的 YAML Skill 名称，供 UI 分组和补全使用。"""
 
     import yaml
 

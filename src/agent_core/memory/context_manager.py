@@ -1,4 +1,4 @@
-"""R2 lifecycle policy, deterministic compaction and conversation recall."""
+"""R2 生命周期策略、确定性压缩与会话召回。"""
 
 from __future__ import annotations
 
@@ -67,7 +67,7 @@ class LifecycleContextManager:
         engine: Any,
         baseline_history_turns: int,
     ) -> bool:
-        """Activate R2 only when it can reduce or recover real context."""
+        """仅在 R2 能缩减或恢复真实上下文时才将其激活。"""
         if not self.enabled:
             return False
         turns = list(turns)
@@ -132,9 +132,8 @@ class LifecycleContextManager:
             for item in pinned_items
         )
         summary = self._render_summary(summary_data)
-        # ``completed_steps`` remains in state/checkpoints for diagnostics, but
-        # it is already represented by the plan and execution history.  Only
-        # model-facing semantic content should activate lifecycle injection.
+        # ``completed_steps`` 仍保留在状态和 Checkpoint 中用于诊断，但计划与
+        # 执行历史已经表达了这些信息。只有面向模型的语义内容才应触发生命周期注入。
         rendered_before = "\n\n".join(
             filter(None, (pinned, summary, conversation))
         )
@@ -150,8 +149,7 @@ class LifecycleContextManager:
             ),
         )
         if before > budget:
-            # Conversation context is the only fully discardable part here;
-            # pinned facts and structured summaries remain protected.
+            # 会话上下文是此处唯一可完全丢弃的部分；固定事实和结构化摘要仍受保护。
             protected = "\n\n".join(filter(None, (pinned, summary)))
             protected_tokens = (
                 engine.get_num_tokens(protected) if protected else 0
@@ -240,9 +238,8 @@ class LifecycleContextManager:
             )
             if not query_fact_keys:
                 relevant_pin = pinned
-            # Known keyed facts are rendered below as a deduplicated
-            # authoritative block. Do not recall their old full turns, which
-            # may also contain a superseded value for another fact key.
+            # 已知的带键事实会在下方渲染为去重后的权威信息块。不要召回它们的旧完整
+            # 轮次，因为其中还可能包含另一个事实键已被取代的值。
             score = (
                 0.0
                 if turn_fact_keys and turn.turn_id not in selected_ids
@@ -280,8 +277,8 @@ class LifecycleContextManager:
                 else "<该轮执行失败，没有可依赖的助手回答>"
             )
             blocks.append(self._turn_block(turn, assistant))
-        # ConversationStore already owns the complete durable transcript.
-        # Do not duplicate omitted turns into ContextStore.
+        # ConversationStore 已经保存完整且持久的对话记录，不要把省略轮次重复写入
+        # 上下文存储。
         rendered = "\n\n".join(blocks)
         rendered = self._fit_text(
             rendered,
@@ -318,8 +315,8 @@ class LifecycleContextManager:
         *,
         active: bool = True,
     ) -> None:
-        # Active turns are already durable in ConversationStore. ContextStore
-        # is intentionally a cold archive, not a duplicate conversation log.
+        # 活动轮次已持久化到 ConversationStore。ContextStore 有意作为冷归档，
+        # 而不是重复的会话日志。
         return
 
     def diagnostic_config(self) -> dict[str, Any]:
@@ -349,12 +346,12 @@ class LifecycleContextManager:
         )
         under_pressure = active_tokens > pressure_threshold
         if under_pressure and len(records) > 1:
-            # Under token pressure retain only the newest record verbatim;
-            # every older record remains recoverable through ContextStore.
+            # 在 Token 压力下只原样保留最新记录；所有较旧记录仍可通过
+            # ContextStore 恢复。
             compact_until = max(compact_until, len(records) - 1)
         else:
-            # Record count alone is not memory pressure. Keep small tasks on
-            # the R1 representation even when they contain many tool calls.
+            # 仅记录数量多并不代表存在内存压力。即使小任务包含多次工具调用，
+            # 也继续使用 R1 表示。
             return False
         warm_from = max(0, len(records) - hot * 2)
         archived = state.setdefault("archived_context_ids", [])
@@ -597,7 +594,7 @@ class LifecycleContextManager:
 
     @staticmethod
     def _bounded_json_value(value: Any) -> Any:
-        """Retain semantic evidence while bounding large collections."""
+        """限制大型集合大小，同时保留语义证据。"""
         if isinstance(value, list):
             if len(value) <= 4:
                 return value
@@ -676,7 +673,7 @@ def initialize_lifecycle_context(config: MemoryConfig) -> LifecycleContextManage
     with _lock:
         if _manager.store is not None:
             _manager.store.close()
-        # Open SQLite only after the first archive passes the ROI policy.
+        # 只有第一次归档通过 ROI 策略后才打开 SQLite。
         _manager = LifecycleContextManager(config, None)
     return _manager
 

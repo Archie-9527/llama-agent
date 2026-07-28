@@ -1,4 +1,4 @@
-"""Shared local-path validation for deterministic file-based tools."""
+"""确定性文件工具共享的本地路径校验。"""
 
 from __future__ import annotations
 

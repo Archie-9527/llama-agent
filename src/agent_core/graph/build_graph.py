@@ -1,18 +1,15 @@
-"""Outer graph assembly — planner → executor ⇄ executor → reflector ⇄ planner.
+"""外层图组装——planner → executor ⇄ executor → reflector ⇄ planner。
 
-This module wires the three node functions together into a compiled
-LangGraph ``StateGraph`` with conditional routing.  It is the single
-place where the system's state-transition logic is defined.
+本模块将三个节点函数连接为带条件路由的已编译 LangGraph ``StateGraph``，是定义
+系统状态转换逻辑的唯一位置。
 
-V3 improvements:
-    1. ``_normalize_entry_state`` — single source of truth for initial
-       state defaults (no more scattered ``.get()`` defaults).
-    2. ``_with_error_isolation`` — wraps every business node so that
-       ``AgentCoreError`` subclasses are converted to graceful
-       ``status="failed"`` instead of crashing ``.invoke()``.
-    3. All edges are conditional — a ``status=="failed"`` check
-       appears before every downstream node to prevent a failed state
-       from cascading.
+V3 改进：
+    1. ``_normalize_entry_state``——初始状态默认值的唯一信息源，不再分散调用
+       ``.get()`` 设置默认值。
+    2. ``_with_error_isolation``——包装每个业务节点，将 ``AgentCoreError`` 子类
+       转换为可控的 ``status="failed"``，而不是让 ``.invoke()`` 崩溃。
+    3. 所有边都使用条件路由——每个下游节点之前都会检查
+       ``status=="failed"``，防止失败状态继续扩散。
 """
 
 from __future__ import annotations
@@ -36,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# [INTERNAL] Initial-state contract — single source of truth for defaults
+# [内部实现] 初始状态契约——默认值的唯一信息源
 # ---------------------------------------------------------------------------
 
 _STATE_DEFAULTS: dict[str, Callable[[], object]] = {
@@ -61,15 +58,13 @@ _STATE_DEFAULTS: dict[str, Callable[[], object]] = {
 
 
 def _normalize_entry_state(state: AgentState) -> AgentState:
-    """The graph's entry node: fill in every optional field that is missing.
+    """图入口节点：补齐所有缺失的可选字段。
 
-    This is the **single authoritative declaration** of initial-state
-    defaults for the outer graph.  Callers (``session.py``) only need
-    to ensure ``task_goal`` is present — all other fields are
-    populated here.
+    这里是外层图初始状态默认值的**唯一权威声明**。调用方（``session.py``）
+    只需确保存在 ``task_goal``，其余字段都在此填充。
 
-    Safe for checkpoint resume: if an older checkpoint is missing a
-    field added later, this node backfills it.
+    此操作对 Checkpoint 恢复安全：如果旧 Checkpoint 缺少后来增加的字段，
+    本节点会补齐该字段。
     """
     for key, default_factory in _STATE_DEFAULTS.items():
         if state.get(key) is None:
@@ -78,12 +73,12 @@ def _normalize_entry_state(state: AgentState) -> AgentState:
 
 
 # ---------------------------------------------------------------------------
-# [INTERNAL] Error isolation — convert AgentCoreError into graceful failure
+# [内部实现] 错误隔离——将 AgentCoreError 转换为可控失败
 # ---------------------------------------------------------------------------
 
 
 def _fail_state(state: AgentState, node_name: str, exc: Exception) -> AgentState:
-    """Record a node failure on the state without re-raising."""
+    """在状态中记录节点失败，不再重新抛出异常。"""
     logger.error("Node '%s' failed — task will terminate: %s", node_name, exc)
     notes: list[str] = state.get("reflection_notes") or []
     notes.append(f"[error in {node_name}] {type(exc).__name__}: {exc}")
@@ -100,11 +95,10 @@ def _fail_state(state: AgentState, node_name: str, exc: Exception) -> AgentState
 def _with_error_isolation(
     node_fn: Callable, node_name: str
 ) -> Callable:
-    """Wrap a node function so that ``AgentCoreError`` subclasses are
-    converted to ``status="failed"`` instead of propagating.
+    """包装节点函数，使 ``AgentCoreError`` 子类转换为 ``status="failed"``，
+    而不是继续向外传播。
 
-    The wrapper respects the original function's parameter count so
-    LangGraph correctly decides whether to pass ``config``.
+    包装器会保留原函数的参数数量，使 LangGraph 能正确判断是否传入 ``config``。
     """
     accepts_config = len(inspect.signature(node_fn).parameters) >= 2
 
@@ -182,20 +176,19 @@ def _with_error_isolation(
 
 
 # ---------------------------------------------------------------------------
-# [INTERNAL] Conditional-edge routing functions
+# [内部实现] 条件边路由函数
 # ---------------------------------------------------------------------------
 
 
 def _route_after_planner(state: AgentState) -> str:
-    """After planning, route to executor *or* terminate if planning failed."""
+    """规划后路由到 Executor；如果规划失败则终止。"""
     if state.get("status") == "failed":
         return END
     return "executor"
 
 
 def _route_after_executor(state: AgentState) -> str:
-    """After executing one step, either loop for the next step or proceed
-    to the Reflector.  Terminate immediately if executor failed."""
+    """执行一个步骤后，循环处理下一步或进入 Reflector；Executor 失败时立即终止。"""
     if state.get("status") == "failed":
         return END
 
@@ -208,11 +201,10 @@ def _route_after_executor(state: AgentState) -> str:
 
 
 def _route_after_reflector(state: AgentState) -> str:
-    """After the Reflector produces a decision, decide the graph's fate.
+    """Reflector 产生决策后，决定图的后续走向。
 
-    * ``done`` / ``failed`` → ``END``.
-    * ``continue`` → ``planner``, **unless** ``max_iterations`` has been
-      reached (force-terminate).
+    * ``done`` / ``failed`` → ``END``。
+    * ``continue`` → ``planner``，但达到 ``max_iterations`` 时会强制终止。
     """
     status: str = state.get("status", "failed")
     current_iteration: int = state.get("current_iteration", 0)
@@ -233,16 +225,16 @@ def _route_after_reflector(state: AgentState) -> str:
 
 
 # ---------------------------------------------------------------------------
-# [STABLE] build_graph
+# [稳定接口] build_graph
 # ---------------------------------------------------------------------------
 
 
 def build_graph(
     checkpointer: Optional[BaseCheckpointSaver] = None,
 ):
-    """Assemble and compile the outer Plan → Execute → Reflect graph.
+    """组装并编译外层“计划 → 执行 → 反思”图。
 
-    Graph topology (V3)::
+    图拓扑（V3）::
 
         entry → normalize_state → planner ──(failed?)───────┐
                                       │                       │
@@ -255,47 +247,47 @@ def build_graph(
                                       (done/failed/limit) → END
                                       (continue) → planner
 
-    Key changes from V1/V2:
-        * Entry node ``normalize_state`` fills in every default.
-        * All three business nodes are wrapped with error isolation.
-        * ``planner → executor`` is now a conditional edge.
+    相对 V1/V2 的主要变化：
+        * 入口节点 ``normalize_state`` 补齐所有默认值。
+        * 三个业务节点全部使用错误隔离包装。
+        * ``planner → executor`` 现在是条件边。
     """
     graph = StateGraph(AgentState)
 
-    # Wrap business nodes with error isolation
+    # 为业务节点添加错误隔离包装
     safe_planner = _with_error_isolation(planner_node, "planner")
     safe_executor = _with_error_isolation(executor_node, "executor")
     safe_reflector = _with_error_isolation(reflector_node, "reflector")
     safe_finalizer = _with_error_isolation(finalizer_node, "finalizer")
 
-    # Register nodes
+    # 注册节点
     graph.add_node("normalize_state", _normalize_entry_state)
     graph.add_node("planner", safe_planner)
     graph.add_node("executor", safe_executor)
     graph.add_node("reflector", safe_reflector)
     graph.add_node("finalizer", safe_finalizer)
 
-    # Entry point
+    # 入口点
     graph.set_entry_point("normalize_state")
 
-    # normalize_state → planner (always)
+    # normalize_state 始终进入 planner
     graph.add_edge("normalize_state", "planner")
 
-    # planner → executor (ok) OR planner → END (failed)
+    # planner 成功时进入 executor，失败时进入 END
     graph.add_conditional_edges(
         "planner",
         _route_after_planner,
         {"executor": "executor", END: END},
     )
 
-    # executor → executor (more steps) OR executor → reflector (all done)
+    # 还有步骤时 executor 自循环，全部完成后进入 reflector
     graph.add_conditional_edges(
         "executor",
         _route_after_executor,
         {"executor": "executor", "reflector": "reflector", END: END},
     )
 
-    # reflector → planner (continue) OR reflector → END (done / failed / limit)
+    # reflector 决定继续时返回 planner，完成、失败或达到上限时进入 END
     graph.add_conditional_edges(
         "reflector",
         _route_after_reflector,

@@ -1,8 +1,7 @@
-"""Optional accelerator-memory sampler.
+"""可选的加速器内存采样器。
 
-NVIDIA collection uses NVML when ``nvidia-ml-py`` is installed.  Unsupported
-platforms return explicit null values instead of pretending unified/process
-memory is dedicated GPU memory.
+安装 ``nvidia-ml-py`` 后，通过 NVML 采集 NVIDIA 指标。不受支持的平台会返回
+明确的空值，而不会把统一内存或进程内存误报为 GPU 专用显存。
 """
 
 from __future__ import annotations

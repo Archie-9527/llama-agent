@@ -1,15 +1,13 @@
-"""Tests for prompt_assembler.py.
+"""测试 prompt_assembler.py。
 
-Covers the four design-doc acceptance criteria:
-  ① Structural validity — SystemMessage first, no orphan ToolMessage,
-     no empty content (except AIMessage with tool_calls).
-  ② Budget validity — token trimming applied, ContextBudgetExceededError
-     when needed.
-  ③ Consistency — tool descriptions from list_capabilities().
-  ④ Determinism — same input → same output.
+覆盖设计文档中的四项验收标准：
+  ① 结构有效性：SystemMessage 位于首位，不存在孤立的 ToolMessage，
+     内容不为空（带 tool_calls 的 AIMessage 除外）。
+  ② 预算有效性：应用 Token 裁剪，并在必要时抛出 ContextBudgetExceededError。
+  ③ 一致性：工具描述来自 list_capabilities()。
+  ④ 确定性：相同输入产生相同输出。
 
-Also covers the three [STABLE] assembly entry points and the
-[INTERNAL] _validate_message_sequence checks.
+同时覆盖三个 [STABLE] 组装入口以及 [INTERNAL] _validate_message_sequence 检查。
 """
 
 from __future__ import annotations
@@ -50,7 +48,7 @@ from agent_core.prompt_assembler import (
 )
 
 
-# ── Lightweight stub token counter ───────────────────────────────────────────
+# ── 轻量级桩 Token 计数器 ───────────────────────────────────────────────────
 
 
 class _CharTokenCounter:
@@ -58,7 +56,7 @@ class _CharTokenCounter:
         return len(text)
 
 
-# ── Fixtures ─────────────────────────────────────────────────────────────────
+# ── 测试夹具 ─────────────────────────────────────────────────────────────────
 
 
 @pytest.fixture(autouse=True)
@@ -89,11 +87,11 @@ def empty_state() -> dict:
 
 
 def _register_test_tool():
-    """Register a minimal tool for tests that need one."""
+    """为需要工具的测试注册一个最小工具。"""
     try:
         from agent_core.capability_registry import get_capability
         get_capability("test_search")
-        return  # already registered (leftover from another test)
+        return  # 已由其他测试注册
     except KeyError:
         pass
 
@@ -113,12 +111,12 @@ def _register_test_tool():
 
 
 # ============================================================================
-# ① Structural validity — validation
+# ① 结构有效性：校验
 # ============================================================================
 
 
 class TestValidateMessageSequence:
-    """Acceptance: _validate_message_sequence enforces all structural rules."""
+    """验收：_validate_message_sequence 执行所有结构规则。"""
 
     def test_empty_list_raises(self):
         with pytest.raises(PromptAssemblyError, match="empty"):
@@ -161,7 +159,7 @@ class TestValidateMessageSequence:
         _validate_message_sequence(msgs)
 
     def test_orphan_tool_message_raises(self):
-        """ToolMessage without preceding AIMessage(tool_calls) → error."""
+        """缺少前置 AIMessage(tool_calls) 的 ToolMessage 应触发错误。"""
         msgs = [
             SystemMessage(content="sys"),
             ToolMessage(content="orphan", tool_call_id="no_match"),
@@ -191,17 +189,17 @@ class TestValidateMessageSequence:
 
 
 # ============================================================================
-# ② History construction
+# ② 历史记录构建
 # ============================================================================
 
 
 class TestBuildHistoryMessages:
-    """Acceptance: execution_log entries → proper BaseMessage sequence."""
+    """验收：execution_log 条目转换为正确的 BaseMessage 序列。"""
 
     def test_tool_used_entry_creates_pair(self):
         log = [{"step": "search", "result": "found it", "tool_used": "search_log"}]
         msgs = _build_history_messages(log)
-        # HumanMessage(step) → AIMessage(tool_calls) → ToolMessage(result)
+        # HumanMessage（步骤）→ AIMessage（工具调用）→ ToolMessage（结果）
         assert isinstance(msgs[0], HumanMessage)
         assert msgs[0].content == "search"
         assert isinstance(msgs[1], AIMessage)
@@ -229,19 +227,19 @@ class TestBuildHistoryMessages:
             for m in msgs
             if isinstance(m, ToolMessage)
         ]
-        assert len(set(ids)) == 2  # all unique
+        assert len(set(ids)) == 2  # 全部唯一
 
     def test_empty_log_returns_empty(self):
         assert _build_history_messages([]) == []
 
 
 # ============================================================================
-# ③ Assembly entry points
+# ③ 组装入口
 # ============================================================================
 
 
 class TestAssemblePlanningPrompt:
-    """Acceptance: assemble_planning_prompt produces valid messages."""
+    """验收：assemble_planning_prompt 生成有效消息。"""
 
     def test_returns_list_of_base_messages(self, engine, empty_state):
         empty_state["task_goal"] = "Write a poem"
@@ -260,7 +258,7 @@ class TestAssemblePlanningPrompt:
         empty_state["task_goal"] = "test"
         empty_state["reflection_notes"] = ["Step 1 was wrong", "Need to replan"]
         msgs = assemble_planning_prompt(empty_state, engine)
-        # A HumanMessage with reflection notes should appear
+        # 应出现包含反思记录的 HumanMessage。
         human_msgs = [m for m in msgs if isinstance(m, HumanMessage)]
         assert len(human_msgs) >= 1
         assert "评估反馈" in human_msgs[0].content
@@ -275,12 +273,12 @@ class TestAssemblePlanningPrompt:
     def test_structural_validity_checked(self, engine, empty_state):
         empty_state["task_goal"] = "ok"
         msgs = assemble_planning_prompt(empty_state, engine)
-        # Should not raise — let _validate_message_sequence pass
+        # 不应抛出异常，应通过 _validate_message_sequence。
         assert isinstance(msgs[0], SystemMessage)
 
 
 class TestAssembleExecutionPrompt:
-    """Acceptance: assemble_execution_prompt produces valid messages."""
+    """验收：assemble_execution_prompt 生成有效消息。"""
 
     def test_returns_valid_structure(self, engine, empty_state):
         empty_state["task_goal"] = "do thing"
@@ -309,7 +307,7 @@ class TestAssembleExecutionPrompt:
             {"step": "search", "result": "found", "tool_used": "test_search"},
         ]
         msgs = assemble_execution_prompt(empty_state, engine)
-        # Should contain a ToolMessage
+        # 应包含 ToolMessage。
         tool_msgs = [m for m in msgs if isinstance(m, ToolMessage)]
         assert len(tool_msgs) == 1
 
@@ -317,8 +315,8 @@ class TestAssembleExecutionPrompt:
         empty_state["task_goal"] = "test"
         empty_state["plan_steps"] = ["step"]
         empty_state["_last_tool_call_id"] = "call_abc"
-        # Pre-populate execution_log with an AIMessage(tool_calls) tool entry
-        # so the appended ToolMessage has a matching preceding AIMessage.
+        # 预先在 execution_log 中加入 AIMessage(tool_calls) 工具条目，
+        # 使追加的 ToolMessage 能匹配前置 AIMessage。
         empty_state["execution_log"] = [
             {"step": "call a tool", "result": "got results from tool", "tool_used": "test_search"},
         ]
@@ -326,16 +324,15 @@ class TestAssembleExecutionPrompt:
         msgs = assemble_execution_prompt(
             empty_state, engine, tool_result="success"
         )
-        # With history providing AIMessage(tool_calls), the tool_result
-        # ToolMessage should validate and be appended last.
+        # 历史记录提供 AIMessage(tool_calls) 后，tool_result 对应的
+        # ToolMessage 应通过校验并追加到末尾。
         tool_msgs = [m for m in msgs if isinstance(m, ToolMessage)]
         assert len(tool_msgs) >= 1
         assert msgs[-1].content == "success"
 
     def test_structural_invalid_input_rejected(self, engine, empty_state):
-        """If _build_history_messages somehow produces an orphan ToolMessage,
-        _validate_message_sequence should catch it."""
-        # We test this by mocking _build_history_messages to return bad data.
+        """若 _build_history_messages 产生孤立 ToolMessage，校验器应将其捕获。"""
+        # 通过模拟 _build_history_messages 返回错误数据进行测试。
         bad_messages = [
             SystemMessage(content="sys"),
             ToolMessage(content="orphan", tool_call_id="no_match"),
@@ -349,7 +346,7 @@ class TestAssembleExecutionPrompt:
 
 
 class TestAssembleReflectionPrompt:
-    """Acceptance: assemble_reflection_prompt produces valid messages."""
+    """验收：assemble_reflection_prompt 生成有效消息。"""
 
     def test_returns_valid_structure(self, engine, empty_state):
         empty_state["task_goal"] = "evaluate this"
@@ -362,13 +359,13 @@ class TestAssembleReflectionPrompt:
         assert "evaluate this" in msgs[0].content.lower() or "evaluate this" in msgs[0].content
 
     def test_no_tools_described(self, engine, empty_state):
-        """Reflector never calls tools, so tools section is absent."""
+        """反思器不会调用工具，因此不应包含工具部分。"""
         _register_test_tool()
         empty_state["task_goal"] = "x"
         msgs = assemble_reflection_prompt(empty_state, engine)
-        # tools section should NOT be present in reflector prompt
+        # 反思 Prompt 中不应出现工具部分。
         content = msgs[0].content
-        # Our template doesn't inject tools → verify
+        # 模板不会注入工具，这里进行验证。
         assert "test_search" not in content
 
     def test_large_tool_result_is_bounded_but_tail_evidence_survives(
@@ -400,12 +397,12 @@ class TestAssembleReflectionPrompt:
 
 
 # ============================================================================
-# ④ Consistency & determinism
+# ④ 一致性与确定性
 # ============================================================================
 
 
 class TestConsistencyAndDeterminism:
-    """Acceptance: same input → same output; tools from single source."""
+    """验收：相同输入产生相同输出，工具来自单一数据源。"""
 
     def test_deterministic_output(self, engine, empty_state):
         empty_state["task_goal"] = "test"
@@ -416,8 +413,7 @@ class TestConsistencyAndDeterminism:
             assert a.content == b.content
 
     def test_tools_from_single_source(self, engine, empty_state):
-        """Verify that the tool descriptions in the system prompt come from
-        list_capabilities(), not from hardcoded strings."""
+        """验证系统 Prompt 中的工具描述来自 list_capabilities()，而非硬编码字符串。"""
         _register_test_tool()
         empty_state["task_goal"] = "search for X"
 
@@ -425,31 +421,30 @@ class TestConsistencyAndDeterminism:
         caps = list_capabilities()
         msgs = assemble_planning_prompt(empty_state, engine)
 
-        # Every registered tool name should appear in the system prompt
+        # 每个已注册工具的名称都应出现在系统 Prompt 中。
         for cap in caps:
             assert cap.name in msgs[0].content
 
 
 # ============================================================================
-# ⑤ Budget management
+# ⑤ 预算管理
 # ============================================================================
 
 
 class TestBudgetManagement:
-    """Acceptance: trim applied, ContextBudgetExceededError on overflow."""
+    """验收：应用裁剪，超出预算时抛出 ContextBudgetExceededError。"""
 
     def test_long_messages_are_trimmed(self, engine, empty_state):
         empty_state["task_goal"] = "t"
         empty_state["execution_log"] = [
             {"step": "s" + "x" * 500, "result": "r" * 500, "tool_used": None},
         ]
-        # With a generous budget it should succeed
+        # 预算充足时应成功。
         msgs = assemble_execution_prompt(empty_state, engine, reserved_for_generation=0)
         assert isinstance(msgs[0], SystemMessage)
 
     def test_tiny_budget_raises(self, engine, empty_state):
-        """If n_ctx is so small even the SystemMessage doesn't fit,
-        we expect ContextBudgetExceededError."""
+        """若 n_ctx 小到无法容纳 SystemMessage，应抛出 ContextBudgetExceededError。"""
         empty_state["task_goal"] = "a" * 10000
         empty_state["n_ctx"] = 10
         with pytest.raises(ContextBudgetExceededError):
@@ -457,12 +452,12 @@ class TestBudgetManagement:
 
 
 # ============================================================================
-# ⑥ Rendering helpers
+# ⑥ 渲染辅助函数
 # ============================================================================
 
 
 class TestRenderToolsSection:
-    """Acceptance: _render_tools_section produces human-readable text."""
+    """验收：_render_tools_section 生成便于阅读的文本。"""
 
     def test_empty_list(self):
         assert _render_tools_section([]) == ""
@@ -474,16 +469,16 @@ class TestRenderToolsSection:
         result = _render_tools_section(caps)
         assert "test_search" in result
         assert "Search the test database" in result
-        assert "query" in result  # parameter name
+        assert "query" in result  # 参数名
 
 
 # ============================================================================
-# ⑦ Integration: full prompt pipeline
+# ⑦ 集成：完整 Prompt 流水线
 # ============================================================================
 
 
 class TestIntegration:
-    """End-to-end: state → assemble → validate → pass to engine (mock)."""
+    """端到端：状态→组装→校验→传递给模拟引擎。"""
 
     def test_full_pipeline_planning(self, engine, empty_state):
         _register_test_tool()
@@ -492,11 +487,11 @@ class TestIntegration:
 
         msgs = assemble_planning_prompt(empty_state, engine)
 
-        # Structural checks
+        # 结构检查
         assert isinstance(msgs[0], SystemMessage)
         _validate_message_sequence(msgs)
 
-        # Content checks
+        # 内容检查
         assert "python docs" in msgs[0].content
         assert "test_search" in msgs[0].content
 

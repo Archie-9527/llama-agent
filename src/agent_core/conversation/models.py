@@ -1,4 +1,4 @@
-"""Conversation persistence models."""
+"""会话持久化模型。"""
 
 from __future__ import annotations
 

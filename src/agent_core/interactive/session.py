@@ -1,4 +1,4 @@
-"""Synchronous conversation service consumed by the terminal UI."""
+"""供终端 UI 使用的同步会话服务。"""
 
 from __future__ import annotations
 
@@ -34,10 +34,10 @@ class TurnOutcome:
 
 
 class InteractiveSession:
-    """Own one user-visible conversation selection.
+    """管理一个用户可见的会话选择。
 
-    The underlying ``TaskRunner`` and ``ConversationStore`` are supplied by
-    the CLI and remain responsible for their own lifecycle.
+    底层 ``TaskRunner`` 和 ``ConversationStore`` 由 CLI 提供，并各自负责自身
+    生命周期。
     """
 
     def __init__(
@@ -107,8 +107,7 @@ class InteractiveSession:
         if self._turn_lock.locked():
             raise RuntimeError("cannot change conversation while a turn is running")
         self.conversation_id = None
-        # Do not resurrect the previous conversation if the user exits before
-        # sending the first message of this new session.
+        # 如果用户尚未发送新会话的第一条消息就退出，不要恢复之前的会话。
         self.last_conversation_file.unlink(missing_ok=True)
 
     def resume_conversation(self, conversation_id: str) -> None:
