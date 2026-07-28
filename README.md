@@ -1,20 +1,13 @@
 # llama-agent
 
-`llama-agent` 是一个完全本地运行的工具型 Agent 系统。项目使用
-`llama-cpp-python` 加载 GGUF 模型，通过 LangChain 的 ChatModel/Tool 
-接口接入模型与工具，并用 LangGraph 实现可 checkpoint、可 resume 的
-Planner–Executor–Reflector–Finalizer 工作流。
+`llama-agent` 是一个完全本地运行的工具型 Agent 系统。项目使用`llama-cpp-python` 加载 GGUF 模型，通过 LangChain 的 ChatModel/Tool 接口接入模型与工具，并用 LangGraph 实现可 checkpoint、可 resume 的Planner–Executor–Reflector–Finalizer 工作流。
 
-系统支持单任务执行、持久化多轮会话、本地工具调用、全屏交互式 CLI、
-运行遥测和可重复 Benchmark。在此基础上，项目实现了两项面向长生命周期
-Agent 的上下文优化：
+系统支持单任务执行、持久化多轮会话、本地工具调用、全屏交互式 CLI、运行遥测和可重复 Benchmark。在此基础上，项目实现了两项面向长生命周期Agent 的上下文优化：
 
 - **R1：工具输出虚拟化**——大型工具结果外置到 ArtifactStore，模型只接收摘要、首尾预览和按需读取句柄。
 - **R2：生命周期上下文管理**——根据上下文的重要性、时效性和访问阶段，选择、压缩或归档历史执行记录与会话轮次。
 
-> 当前 R1/R2 属于 Agent 应用层的上下文优化。它们能够减少输入 Token、
-> Prompt 预填充开销和逻辑 KV 占用，但没有修改 llama.cpp 的物理 KV Cache
-> 分配器。
+> 当前 R1/R2 属于 Agent 应用层的上下文优化。它们能够减少输入 Token、Prompt 预填充开销和逻辑 KV 占用，但没有修改 llama.cpp 的物理 KV Cache分配器。
 
 ## 目录
 
@@ -117,25 +110,21 @@ SQLite 工具只允许读取；
 
 ### 2.1 R0：无上下文优化的功能基线
 
-R0 关闭所有 `[memory]` 优化开关，工具原始结果和基线会话历史直接进入模型
-上下文。用于验证 Agent 功能是否完整，并作为 R1/R2 的对照组。
+R0 关闭所有 `[memory]` 优化开关，工具原始结果和基线会话历史直接进入模型上下文。用于验证 Agent 功能是否完整，并作为 R1/R2 的对照组。
 
 完成一次任务的主要流程如下：
 
 1. **Planner** 根据用户目标生成可执行步骤；普通问题也可以生成无工具回答步骤。
-2. **Executor** 执行当前步骤。需要外部证据时，内部 ReAct 子图生成结构化
-`tool_calls`，真实调用 Capability，并将 `ToolMessage` 重新送回模型。
+2. **Executor** 执行当前步骤。需要外部证据时，内部 ReAct 子图生成结构化`tool_calls`，真实调用 Capability，并将 `ToolMessage` 重新送回模型。
 3. **Reflector** 检查计划和真实执行记录，决定任务完成、失败或重新规划。
 4. **Finalizer** 根据用户目标、计划和执行证据生成统一 `final_answer`。
-5. LangGraph Checkpointer 在节点边界保存状态；进程中断后可以按照 `thread_id`
-   继续执行。
+5. LangGraph Checkpointer 在节点边界保存状态；进程中断后可以按照 `thread_id`继续执行。
 
 ### 2.2 R1：工具输出虚拟化
 
 #### 问题
 
-调用日志、文件或数据库工具可能一次返回几十数百 KiB的数据，若每轮对话都把完整
-结果写入 ToolMessage、LangGraph State 和后续 Prompt，会同时造成：
+调用日志、文件或数据库工具可能一次返回几十数百 KiB的数据，若每轮对话都把完整结果写入 ToolMessage、LangGraph State 和后续 Prompt，会同时造成：
 
 - 输入 Token 与 Prefill 时间增加；
 - 逻辑 KV Cache 随上下文增长；
@@ -159,10 +148,7 @@ R0 关闭所有 `[memory]` 优化开关，工具原始结果和基线会话历�
           └── 模型只接收摘要、头部预览、尾部预览和可用操作
 ```
 
-当前摘要是**确定性摘要**，不会额外调用模型。它包含工具名、原始字节数、
-行数和结构化结果中的小型标量字段；`content`、`stdout`、`rows`、`matches`
-等字段不会复制到摘要。预览在固定字符预算内平均保留头部和尾部，适合
-证据分别位于文件开头或结尾的场景。
+当前摘要是**确定性摘要**，不会额外调用模型。它包含工具名、原始字节数、行数和结构化结果中的小型标量字段；`content`、`stdout`、`rows`、`matches`等字段不会复制到摘要。预览在固定字符预算内平均保留头部和尾部，适合证据分别位于文件开头或结尾的场景。
 
 ArtifactStore 采用混合存储：
 
@@ -177,72 +163,26 @@ ArtifactStore 采用混合存储：
 - `search_artifact`：在完整 Artifact 中检索关键词并返回有限上下文；
 - `retrieve_artifact`：按 `offset + length` 分段读取原文。
 
-这项优化不依赖特定模型或推理引擎，也不增加摘要推理调用。它的主要代价是
-磁盘写入、SQLite 元数据和按需检索调用，因此阈值过低会对小结果产生负优化。
+这项优化不依赖特定模型或推理引擎，也不增加摘要推理调用。它的主要代价是磁盘写入、SQLite 元数据和按需检索调用，因此阈值过低会对小结果产生负优化。
 
 ### 2.3 R2：生命周期上下文管理
 
 #### 问题
 
-R1 只处理单个“大结果”。在长任务中，许多低于阈值的中型结果仍会累计进入prompt；
-在长会话中，prompt会保留最近 N 轮对话，造成prompt冗余或过长。R2 优化处理这种
-情况。
+R1 只处理单次产生的超大工具结果，但 Agent 在长任务和多轮对话中还会不断积累执行记录、工具摘要和历史消息。这些内容即使每条都不大，累计后仍会使 Prompt越来越长，增加输入 Token、预填充时间和 Checkpoint 体积。
+如果简单删除旧记录，模型又可能忘记用户要求记住的事实、早期工具证据或任务结论。因此，R2 需要在减少上下文长度和保留有效记忆之间取得平衡。
 
-#### 生命周期模型
+#### 设计原理
 
-| 生命周期 | 含义 | 默认处理 |
-|---|---|---|
-| `PINNED` | 当前目标、明确要求记住的事实、有效计划 | 优先保留 |
-| `HOT` | 最近工具记录和最近会话轮次 | 保留原文 |
-| `WARM` | 较旧但仍可能访问的上下文 | 摘要留在状态，原文外置 |
-| `COLD` | 已完成阶段或低频历史 | 归档到 ContextStore |
-| `DEAD` | 已失效或结束的上下文 | 不再注入活动 Prompt |
+R2 将上下文看作需要持续整理的模块：重要内容和最近使用的内容保留在 Prompt中，较早内容压缩后归档，已经失效或与当前问题无关的内容不再重复发送给模型。
 
-当前实现包含两条互补路径。
+具体处理方式如下：
 
-#### 路径一：执行状态压缩
-
-当 `execution_log` 的累计 Token 超过压力阈值后，R2：
-
-1. 保护最近的 HOT 记录；
-2. 对较旧记录生成确定性、证据感知摘要；
-3. 只有原文大小和预计压缩率均达到 ROI 阈值时才执行压缩；
-4. 将原文按任务隔离写入 `ContextStore`；
-5. 在 LangGraph State 中保留摘要、`memory://` 引用和生命周期；
-6. 同步减少后续 Prompt 与 SQLite Checkpoint 中的重复文本。
-
-`ContextStore` 位于 `memory.context_store_path`，使用 SQLite 表
-`context_entries` 保存归档内容、内容哈希、Token 数、生命周期、来源和
-Artifact 引用。Benchmark 会为每个样本重定向到独立目录。
-
-#### 路径二：长会话上下文选择
-
-当完整历史超过激活阈值，或当前问题需要召回最近窗口之外的明确记忆时，R2
-不再简单拼接最近 N 轮，而是构建预算内的上下文投影：
-
-1. 提取“记住、修正、更正、不再有效”等显式记忆；
-2. 对项目代号、校验码、部署环境、服务、端口和 request_id 等结构化事实采用
-   “后写覆盖前写”；
-3. 保留最近 `hot_conversation_turns` 轮；
-4. 根据当前问题与历史文本的词项重合度召回 Top-K 相关旧轮次；
-5. 在 `context_retrieval_token_budget` 内生成最终会话上下文；
-6. 完整原始会话仍保存在 `conversations.sqlite`，不重复写入 ContextStore。
-
-该实现是一种确定性、可评测的生命周期策略，不等同于通用语义记忆。当前
-结构化事实抽取覆盖有限字段；需要支持任意知识时，可在后续接入 Embedding
-检索、可学习重要度或模型摘要。
-
-#### 自适应与防负优化
-
-R2 不会对每个任务强制压缩：
-
-- 短对话低于 `context_activation_tokens` 时沿用 R1 行为；
-- 工具记录只有在累计 Token 达到压力阈值后才考虑归档；
-- 单条记录小于 `context_min_compaction_bytes` 时跳过；
-- 压缩收益低于 `context_min_compaction_ratio` 时跳过；
-- ContextStore 在第一次有效归档时才创建；
-- Reflector 和 Finalizer 不重复注入同一份生命周期摘要。
-
+1. **保留重要内容**：优先保留当前目标、有效计划、用户明确要求记住的内容，以及最近几轮对话和最近几条执行记录。
+2. **压缩较早记录**：当执行记录累计超过阈值时，从旧记录中提取结论、错误和关键内容，生成不调用模型的确定性摘要。原文写入 `ContextStore`，Agent 状态只保留摘要和 `memory://` 引用。
+3. **按需选择会话历史**：每轮对话只注入明确记忆、最近对话和与当前问题相关的较早对话；用户更正信息时，以新信息覆盖旧信息。
+4. **保留完整原始数据**：完整会话仍存储在 `conversations.sqlite`，归档执行记录存储在 `ContextStore`。缩短 Prompt 但不是删除历史。
+5. **避免无效压缩**：只有上下文超过激活阈值，并且预计压缩后有明显收益时才执行归档。短任务、小记录和压缩收益不足的记录保持原样。
 
 ### 2.4 开关与主要参数
 
@@ -292,10 +232,8 @@ export AGENT_MEMORY_LIFECYCLE_CONTEXT=true
 Benchmark 采用以下方法减少不可控因素：
 
 - Fixture 全部在本地确定性生成，不依赖网络。
-- 每个样本在新的 Python 子进程中加载模型，隔离 llama.cpp 分配器、KV 状态、
-  Checkpoint、ConversationStore、ArtifactStore 和 ContextStore。
-- 同一 Suite 的 R0/R1/R2 使用相同模型文件、模型 SHA-256、采样种子、
-  Fixture、任务和评价规则。
+- 每个样本在新的 Python 子进程中加载模型，隔离 llama.cpp 分配器、KV 状态、Checkpoint、ConversationStore、ArtifactStore 和 ContextStore。
+- 同一 Suite 的 R0/R1/R2 使用相同模型文件、模型 SHA-256、采样种子、Fixture、任务和评价规则。
 - `suite.seed + repetition` 作为每次重复的模型随机种子。
 - Warmup 样本单独执行，但不计入正式汇总。
 - 自动保存原始 JSONL/CSV、失败详情、聚合结果、Markdown 报告与 SVG 图表。
@@ -344,6 +282,7 @@ report.md
 > GPU: NVIDIA vGPU-32GB
 > 内存: 90G
 > 镜像: PyTorch  2.8.0 CUDA 12.8 
+> 模型: Qwen3VL-8B-Instruct-Q8_0.gguf
 
 
 #### 实验 A：通用功能与 R1 大输出优化
@@ -374,10 +313,7 @@ R1 相对 R0：
 - Checkpoint 总量减少 **22.42%**；
 - 平均端到端耗时减少 **4.51%**。
 
-R1 共虚拟化 10 个大型结果，外置原文 418,490 B，减少模型内联
-400,155 B，工具结果压缩率为 95.62%。收益主要来自 16/64 KiB 两个 W4 Case；
-其中 64 KiB Case 的输入 Token/样本从 21,572 降至 3,960，平均耗时从
-30.93 s 降至 15.74 s。
+R1 共虚拟化 10 个大型结果，外置原文 418,490 B，减少模型内联400,155 B，工具结果压缩率为 95.62%。收益主要来自 16/64 KiB 两个 W4 Case；其中 64 KiB Case 的输入 Token/样本从 21,572 降至 3,960，平均耗时从30.93 s 降至 15.74 s。
 
 #### 实验 B：R2 累计执行上下文压力
 本轮测试连续读取 6 个 6000 B 文件
@@ -407,8 +343,7 @@ R2 相对 R1：
 #### 实验 C：R2 长会话生命周期
 
 数据源：
-本轮测试包含 16 轮召回、32 轮召回、多阶段本地证据和 Artifact 中部证据回归，
-每轮共 20 个正式样本。
+本轮测试包含 16 轮召回、32 轮召回、多阶段本地证据和 Artifact 中部证据回归，每轮共 20 个正式样本。
 
 | 指标 | R0 | R1 | R2 |
 |---|---:|---:|---:|
@@ -424,21 +359,15 @@ R2 相对 R1：
 
 ![长会话套件累计输入 Token](benchmark/graph/r2_lifecycle_context/success_rate.svg)
 
-R0/R1 的会话基线只保留最近 8 轮，无法在 16/32 轮后看到最早的
-  `AgentMem/7319`，两类召回 Case 均为 0/5，因此R0，R1执行成功率低于R2。
+R0/R1 的会话基线只保留最近 8 轮，无法在 16/32 轮后看到最早的`AgentMem/7319`，两类召回 Case 均为 0/5，因此R0，R1执行成功率低于R2。
 
-R2 相对 R1 的输入 Token 减少 **10.24%**，平均端到端耗时减少 **18.21%**。
-生命周期遥测显示会话上下文投影压缩率为 41.50%，额外召回 450 个历史轮次
-记录，最终选择 1,050 个轮次记录，共注入 49,130 Token。
+R2 相对 R1 的输入 Token 减少 **10.24%**，平均端到端耗时减少 **18.21%**。生命周期遥测显示会话上下文投影压缩率为 41.50%，额外召回 450 个历史轮次记录，最终选择 1,050 个轮次记录，共注入 49,130 Token。
 
 #### 结果结论
 
-1. **R1 已在大工具输出场景形成稳定收益**：成功率不下降，同时明显减少输入
-   Token、逻辑 KV、Checkpoint 和 64 KiB Case 延迟。
-2. **R2 必须在达到上下文压力或历史超出最近窗口时评估**：短任务不触发是
-   自适应策略的预期行为。
-3. **R2 执行状态压缩有效**：长对话任务中 Token、逻辑 KV、Checkpoint 和延迟
-   均下降。
+1. **R1 已在大工具输出场景形成稳定收益**：成功率不下降，同时明显减少输入Token、逻辑 KV、Checkpoint 和 64 KiB Case 延迟。
+2. **R2 必须在达到上下文压力或历史超出最近窗口时评估**：短任务不触发是自适应策略的预期行为。
+3. **R2 执行状态压缩有效**：长对话任务中 Token、逻辑 KV、Checkpoint 和延迟均下降。
 
 ### 3.4 执行 Benchmark
 
@@ -635,8 +564,7 @@ llama-agent --config agent_config.toml cli --show-thinking
 llama-agent --config agent_config.toml cli --conversation-id <conversation_id>
 ```
 
-等待模型时界面显示动态省略号；任务完成后一次性显示回答。右侧状态区展示
-会话、模型配置、Token、逻辑 KV、RSS 和 GPU 显存等信息。
+等待模型时界面显示动态省略号；任务完成后一次性显示回答。右侧状态区展示会话、模型配置、Token、逻辑 KV、RSS 和 GPU 显存等信息。
 
 常用斜杠命令：
 
@@ -667,9 +595,7 @@ llama-agent --config agent_config.toml cli --conversation-id <conversation_id>
 
 这些命令只约束本轮必须使用指定 Capability。
 
-`tui.show_thinking` 或 `--show-thinking` 只控制是否展示模型返回的原始思考内容；
-只有 `engine.disable_thinking = false` 时，支持 Thinking 的模型才通常会生成
-该内容。
+`tui.show_thinking` 或 `--show-thinking` 只控制是否展示模型返回的原始思考内容；只有 `engine.disable_thinking = false` 时，支持 Thinking 的模型才通常会生成该内容。
 
 ### 4.8 测试
 
